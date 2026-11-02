@@ -1,0 +1,14 @@
+{
+  "data_source": "synthetic_demo",
+  "crs": "EPSG:32643",
+  "gsd_m": 0.05,
+  "size_px": 768,
+  "bands": [
+    "red",
+    "green",
+    "rededge",
+    "nir"
+  ],
+  "reflectance_calibrated": true,
+  "planted_patches": []
+}

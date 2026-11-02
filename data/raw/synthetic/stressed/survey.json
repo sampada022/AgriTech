@@ -1,0 +1,36 @@
+{
+  "data_source": "synthetic_demo",
+  "crs": "EPSG:32643",
+  "gsd_m": 0.05,
+  "size_px": 768,
+  "bands": [
+    "red",
+    "green",
+    "rededge",
+    "nir"
+  ],
+  "reflectance_calibrated": true,
+  "planted_patches": [
+    {
+      "cx": 0.28,
+      "cy": 0.3,
+      "radius_m": 1.6,
+      "severity": 0.85,
+      "kind": "compact"
+    },
+    {
+      "cx": 0.68,
+      "cy": 0.62,
+      "radius_m": 1.1,
+      "severity": 0.7,
+      "kind": "compact"
+    },
+    {
+      "cx": 0.5,
+      "cy": 0.82,
+      "radius_m": 2.6,
+      "severity": 0.55,
+      "kind": "elongated"
+    }
+  ]
+}

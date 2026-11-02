@@ -1,0 +1,9 @@
+{
+  "bank_size": 2310,
+  "calibration": {
+    "floor": 0.4857333302497864,
+    "span": 0.4017269015312195
+  },
+  "split": "held_out_survey",
+  "n_reference_surveys": 2
+}

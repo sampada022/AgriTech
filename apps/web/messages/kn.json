@@ -1,0 +1,28 @@
+{
+  "app_title": "AeroScout ಫೀಲ್ಡ್ ಸ್ಕೌಟ್",
+  "mission_title": "ಸ್ಕೌಟ್ ಮಿಷನ್: ಮಂಡ್ಯ ಪ್ಲಾಟ್ ೪",
+  "simulate_walk": "ವಾಕ್ ಸಿಮ್ಯುಲೇಶನ್",
+  "simulating_walk": "ವಾಕಿಂಗ್ ಸಿಮ್ಯುಲೇಟ್ ಆಗುತ್ತಿದೆ",
+  "stop_progress": "ನಿಲುಗಡೆ",
+  "of": "/",
+  "remaining_eta": "ಉಳಿದಿರುವ ಸಮಯ",
+  "active_target": "ಸಕ್ರಿಯ ಗುರಿ",
+  "tier_red": "ಕೆಂಪು (ಕ್ರಮ ಕೈಗೊಳ್ಳಿ)",
+  "tier_amber": "ಅಂಬರ್ (ಪರಿಶೀಲಿಸಿ)",
+  "tier_grey": "ಬೂದು (ಪರಿಸರ ಒತ್ತಡ)",
+  "distance_ahead": "ಮುಂದಿರುವ ದೂರ",
+  "within_arrival": "ನಿಲುಗಡೆ ವಲಯದಲ್ಲಿದೆ. ಬೆಳೆ ಹಾನಿಯನ್ನು ಪರಿಶೀಲಿಸಿ.",
+  "take_leaf_photo": "ಎಲೆಯ ಹತ್ತಿರದ ಫೋಟೋ ತೆಗೆಯಿರಿ",
+  "analyzing_photo": "ಎಲೆ ವಿಶ್ಲೇಷಿಸಲಾಗುತ್ತಿದೆ...",
+  "ai_diagnosis_title": "ರಚನಾತ್ಮಕ ಎಐ ರೋಗನಿದಾನ",
+  "top_candidate": "ಸಂಭಾವ್ಯ ಮುಖ್ಯ ಕಾರಣ:",
+  "field_symptoms": "ಕಂಡುಬಂದ ಲಕ್ಷಣಗಳು:",
+  "ipm_recommendation": "ಸಮಗ್ರ ಕೀಟ ನಿರ್ವಹಣೆ (IPM) ಸಲಹೆ:",
+  "confirm_button": "ಖಚಿತಪಡಿಸಿ (ಲೈವ್ ಮಾದರಿ ತರಬೇತಿ)",
+  "false_alarm": "ಸುಳ್ಳು ಎಚ್ಚರಿಕೆ (ಆರೋಗ್ಯಕರ)",
+  "advance_next": "ಮುಂದಿನ ನಿಲ್ದಾಣಕ್ಕೆ ಮುನ್ನಡೆಯಿರಿ",
+  "return_dashboard": "ಮಿಷನ್ ಡ್ಯಾಶ್‌ಬೋರ್ಡ್‌ಗೆ ಹಿಂತಿರುಗಿ",
+  "add_manual_hotspot": "ಹೊಸ ಹಾಟ್‌ಸ್ಪಾಟ್ ಹಸ್ತಚಾಲಿತವಾಗಿ ಸೇರಿಸಿ",
+  "language_toggle": "ಕನ್ನಡ / English"
+}
+

@@ -1,0 +1,28 @@
+{
+  "app_title": "AeroScout Field Scout",
+  "mission_title": "Scout Mission: Mandya Plot 4",
+  "simulate_walk": "Simulate Walk",
+  "simulating_walk": "Simulating Walk",
+  "stop_progress": "Stop",
+  "of": "of",
+  "remaining_eta": "Remaining ETA",
+  "active_target": "Active Target",
+  "tier_red": "Red (Act)",
+  "tier_amber": "Amber (Inspect)",
+  "tier_grey": "Grey (Abiotic)",
+  "distance_ahead": "Distance ahead",
+  "within_arrival": "Within arrival zone. Check crop canopy.",
+  "take_leaf_photo": "Take Ground Leaf Photo",
+  "analyzing_photo": "Analyzing Leaf Photo...",
+  "ai_diagnosis_title": "Structured AI Diagnosis",
+  "top_candidate": "Top Candidate Cause:",
+  "field_symptoms": "Field Symptoms:",
+  "ipm_recommendation": "IPM Recommendation:",
+  "confirm_button": "Confirm Ground Truth",
+  "false_alarm": "False Alarm",
+  "advance_next": "Advance to Next Stop",
+  "return_dashboard": "Return to Desktop Mission Dashboard",
+  "add_manual_hotspot": "Add Hotspot Manually",
+  "language_toggle": "English / ಕನ್ನಡ"
+}
+
