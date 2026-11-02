@@ -1,0 +1,120 @@
+@import "tailwindcss";
+
+:root, :root[data-theme="light"] {
+  --bg: #F4F1E6; --surface: #FCFBF6; --text: #1B1F17; --muted: #5C6354; --border: #DDD8C6;
+  --hot: #C2391B; --canopy: #2E5A34; --stress: #8A5D00;
+  --on-hot: #FCFBF6; --on-canopy: #FCFBF6;
+  --band-bg: #2E5A34; --band-fg: #FCFBF6;
+  /* map surfaces */
+  --map-bg: #E9E4D2; --tile-raw: #D3CDB4; --tile-ok: #6E9A6F; --tile-ok-edge: #2E5A34;
+  --map-line: #1B1F17; --scan: #C2391B;
+  --shadow: 0 40px 80px -24px rgba(27,31,23,.35), 0 12px 24px -12px rgba(27,31,23,.2);
+}
+:root[data-theme="dark"] {
+  --bg: #0E110D; --surface: #171B15; --text: #ECEAE0; --muted: #9AA290; --border: #2A3026;
+  --hot: #FF6B42; --canopy: #8CC77F; --stress: #E8B23A;
+  --on-hot: #0E110D; --on-canopy: #0E110D;
+  --band-bg: #171B15; --band-fg: #ECEAE0;
+  --map-bg: #090B08; --tile-raw: #1C2219; --tile-ok: #26402A; --tile-ok-edge: #3C6B43;
+  --map-line: #ECEAE0; --scan: #FF6B42;
+  --shadow: 0 40px 80px -24px rgba(0,0,0,.8), 0 12px 24px -12px rgba(0,0,0,.6);
+}
+
+@theme inline {
+  --color-bg: var(--bg); --color-surface: var(--surface); --color-ink: var(--text);
+  --color-muted: var(--muted); --color-line: var(--border); --color-hot: var(--hot);
+  --color-canopy: var(--canopy); --color-stress: var(--stress);
+  --color-on-hot: var(--on-hot); --color-on-canopy: var(--on-canopy);
+  --color-band: var(--band-bg); --color-band-fg: var(--band-fg);
+  --color-mapbg: var(--map-bg);
+  --font-display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --radius-ctl: 6px; --radius-card: 16px;
+  --shadow-float: var(--shadow);
+}
+
+html { scroll-behavior: auto; }
+html.lenis, html.lenis body { height: auto; }
+.lenis.lenis-smooth { scroll-behavior: auto !important; }
+.lenis.lenis-stopped { overflow: hidden; }
+
+body {
+  margin: 0; background-color: var(--bg); color: var(--text);
+  font-family: var(--font-body); font-size: 17px; line-height: 1.6; font-weight: 400;
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--text) 4%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--text) 4%, transparent) 1px, transparent 1px);
+  background-size: 48px 48px;
+  transition: background-color .3s, color .3s;
+  -webkit-font-smoothing: antialiased; overflow-x: clip;
+}
+*, *::before, *::after { transition-property: background-color, border-color, color, fill, stroke; transition-duration: .3s; transition-timing-function: cubic-bezier(.22,1,.36,1); }
+/* GSAP / framer-driven elements must not be fought by CSS transitions */
+.no-tr, .no-tr * { transition: none; }
+
+h1, h2, h3, .font-display { font-family: var(--font-display); font-variation-settings: "opsz" 96; }
+h1, h2 { letter-spacing: -0.03em; line-height: 1.02; font-weight: 700; }
+h1 { font-size: clamp(2.75rem, 7vw, 6.5rem); }
+h2 { font-size: clamp(2rem, 4.5vw, 3.75rem); }
+h3 { font-size: 1.5rem; line-height: 1.15; font-weight: 600; letter-spacing: -0.01em; }
+p { max-width: 65ch; }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.label { font-family: var(--font-mono); font-size: 12px; text-transform: uppercase; letter-spacing: .12em; line-height: 1.4; }
+.bignum { font-family: var(--font-display); font-weight: 700; font-size: clamp(3rem, 8vw, 7rem); line-height: 1; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; font-variation-settings: "opsz" 96; }
+
+.section { padding-block: 80px; }
+@media (min-width: 1024px) { .section { padding-block: 128px; } }
+.wrap { width: 100%; max-width: 1280px; margin-inline: auto; padding-inline: 24px; }
+
+:focus-visible { outline: 2px solid var(--hot); outline-offset: 2px; }
+
+/* underline-draw links */
+.link-u { position: relative; display: inline-flex; align-items: center; gap: 8px; }
+.link-u::after { content: ""; position: absolute; left: 0; right: 0; bottom: -2px; height: 1px; background: currentColor; transform: scaleX(0); transform-origin: right; transition: transform .5s cubic-bezier(.22,1,.36,1); }
+.link-u:hover::after, .link-u:focus-visible::after { transform: scaleX(1); transform-origin: left; }
+
+/* hotspot pulse */
+@keyframes pulse-ring { 0% { transform: scale(.6); opacity: .9; } 100% { transform: scale(2.2); opacity: 0; } }
+.pulse-ring { transform-box: fill-box; transform-origin: center; animation: pulse-ring 2.4s cubic-bezier(.22,1,.36,1) infinite; transition: none; }
+@keyframes scroll-line { 0% { transform: scaleY(0); transform-origin: top; } 50% { transform: scaleY(1); transform-origin: top; } 51% { transform-origin: bottom; } 100% { transform: scaleY(0); transform-origin: bottom; } }
+.scroll-line { animation: scroll-line 2.2s cubic-bezier(.22,1,.36,1) infinite; transition: none; }
+
+/* custom cursor */
+html.has-cursor, html.has-cursor * { cursor: none !important; }
+html.has-cursor input, html.has-cursor textarea { cursor: text !important; }
+
+.corner { position: absolute; width: 14px; height: 14px; border-color: var(--text); opacity: .7; }
+.sr-only-x { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse-ring, .scroll-line { animation: none; }
+  *, *::before, *::after { transition-duration: .01ms !important; }
+}
+
+/* Always-dark "night flight" stage (used by the learning-loop orbit in both themes) */
+.stage-dark {
+  --bg: #0E110D; --surface: #171B15; --text: #ECEAE0; --muted: #9AA290; --border: #2A3026;
+  --hot: #FF6B42; --canopy: #8CC77F; --stress: #E8B23A; --on-hot: #0E110D;
+  --map-bg: #090B08; --tile-raw: #1C2219; --tile-ok: #26402A; --tile-ok-edge: #3C6B43; --map-line: #ECEAE0;
+  background: #090B08; color: var(--text);
+}
+
+@media print {
+  .no-print { display: none !important; }
+  body { background: #fff !important; color: #000 !important; }
+  aside, header.sticky { display: none !important; }
+  .lg\:grid { display: block !important; }
+}
+
+/* grid children may shrink below their content, so wide tables/charts scroll inside their card instead of widening the page */
+.grid > * { min-width: 0; }
+
+/* same survey-grid paper as the body, for the preloader curtain halves */
+.paper {
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--text) 4%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--text) 4%, transparent) 1px, transparent 1px);
+  background-size: 48px 48px;
+}

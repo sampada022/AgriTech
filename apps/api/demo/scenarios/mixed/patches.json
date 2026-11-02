@@ -1,0 +1,42 @@
+[
+  {
+    "id": "patch_1",
+    "type": "pest",
+    "center_px": [
+      231,
+      713
+    ],
+    "radius_px": 55,
+    "area_m2": 6.15
+  },
+  {
+    "id": "patch_2",
+    "type": "pest",
+    "center_px": [
+      637,
+      435
+    ],
+    "radius_px": 46,
+    "area_m2": 4.35
+  },
+  {
+    "id": "patch_3",
+    "type": "pest",
+    "center_px": [
+      1565,
+      1266
+    ],
+    "radius_px": 45,
+    "area_m2": 4.18
+  },
+  {
+    "id": "patch_4",
+    "type": "pest",
+    "center_px": [
+      1389,
+      1014
+    ],
+    "radius_px": 42,
+    "area_m2": 3.66
+  }
+]
