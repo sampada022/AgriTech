@@ -103,7 +103,7 @@ def test_request_carries_the_image_prompt_and_schema(stub):
     stub.replies.append((200, message(json.dumps(VALID))))
     provider().diagnose(b"jpeg-bytes", CONTEXT)
     request = stub.requests[0]
-    assert request["model"] == "claude-opus-5-5"
+    assert request["model"] == "claude-opus-5"
     assert request["system"] == SYSTEM_PROMPT
     assert request["output_config"]["effort"] == "low"
     assert request["output_config"]["format"]["type"] == "json_schema"

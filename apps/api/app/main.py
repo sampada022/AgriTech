@@ -95,17 +95,17 @@ for r in (auth_router, farmer_router, verdict_router, assisted_router, admin_rou
 app.mount("/files", RevalidatedFiles(directory=public_dir(), check_dir=False), name="files")
 
 # Mount the SPA static files from website_app/dist so frontend & backend run on one port seamlessly.
+# The site routes entirely by URL hash (#/dashboard, #/login, ...), which never leaves the browser,
+# so the server only ever needs to serve "/" itself -- no history-API catch-all, and nothing here
+# can shadow a real /api or /files 404 into a 200.
 DIST_DIR = Path(__file__).resolve().parents[3] / "website_app" / "dist"
 if DIST_DIR.exists():
     from fastapi.responses import FileResponse
 
     app.mount("/assets", StaticFiles(directory=DIST_DIR / "assets"), name="assets")
 
-    @app.get("/{full_path:path}")
-    def serve_spa(full_path: str):
-        file_path = DIST_DIR / full_path
-        if file_path.is_file():
-            return FileResponse(file_path)
+    @app.get("/")
+    def serve_spa():
         return FileResponse(DIST_DIR / "index.html")
 else:
     @app.get("/")

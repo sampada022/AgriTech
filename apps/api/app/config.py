@@ -41,12 +41,19 @@ class Settings(BaseSettings):
     max_photo_pixels: int = 50_000_000
     max_field_diagonal_m: float = 5000.0  # the flat-earth approximation degrades beyond this
 
-    diagnosis_provider: str = "anthropic"  # anthropic | none
-    diagnosis_model: str = "claude-opus-5-5"
+    diagnosis_provider: str = "gemini"  # anthropic | gemini | none
+    # Was "claude-opus-5-5" -- not a real model id, so every call 404'd and silently fell back
+    # to the canned demo reply regardless of API key. The provider's refusal-fallback params
+    # (fallbacks="default") are Opus/Fable-tier, so keep this on Opus 5 rather than swap tiers.
+    diagnosis_model: str = "claude-opus-5"
     diagnosis_effort: str = "low"
     diagnosis_timeout_s: float = 12.0
     diagnosis_retries: int = 1
     anthropic_api_key: str | None = None
+    # Rolling alias (always the current lite-flash model). Tried "gemini-flash-latest" first --
+    # it returned 503 "high demand" consistently on the free tier; this tier didn't.
+    gemini_model: str = "gemini-flash-lite-latest"
+    gemini_api_key: str | None = None
     diagnosis_rate_limit_per_min: int = 10
     # Behind cloudflared every request appears to come from localhost, so read the real client IP
     # from the tunnel's header. Only enable this when the API is reachable through the tunnel only.

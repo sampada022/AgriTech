@@ -35,6 +35,12 @@ SHADOW_BRIGHTNESS_RATIO = 0.62
 OPEN_M = 0.15  # removes specks
 CLOSE_M = 0.75  # wider than damage speckle, so holes in a pest patch are not read as bare soil
 SHADOW_BLUR_M = 0.3
+# Radius of the "is this pixel darker than its surroundings" neighbourhood. Real shadow (tree lines,
+# equipment, cloud) is narrow relative to this; a genuinely denser or different-crop patch many
+# metres across is not, so it survives comparison against a reference this local. A single global
+# median reference (the previous approach) instead compared every pixel to the whole image's
+# brightness, which reads an entire dense, darker-canopy field as "shadow" next to a paler one.
+SHADOW_LOCAL_RADIUS_M = 6.0
 
 # Orthomosaics have large empty margins outside the flown area. JPEG re-encoding leaves them
 # near-black rather than exactly black, hence a small tolerance. The opening keeps dark gaps inside
@@ -195,8 +201,9 @@ def canopy_mask(
     ).astype(bool)
     sigma = max(1.0, SHADOW_BLUR_M / gsd_m / 4)
     blurred = cv2.GaussianBlur(small, (0, 0), sigma)
-    reference = float(np.median(blurred[small_data])) if small_data.any() else 0.0
-    shadow_small = ((blurred < SHADOW_BRIGHTNESS_RATIO * reference) & small_data).astype(np.uint8)
+    local_sigma = max(sigma * 4, SHADOW_LOCAL_RADIUS_M / gsd_m / 4)
+    local_reference = cv2.GaussianBlur(blurred, (0, 0), local_sigma)
+    shadow_small = ((blurred < SHADOW_BRIGHTNESS_RATIO * local_reference) & small_data).astype(np.uint8)
     shadow = cv2.resize(
         shadow_small, (norm.shape[1], norm.shape[0]), interpolation=cv2.INTER_NEAREST
     ).astype(bool)

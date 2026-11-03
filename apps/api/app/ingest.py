@@ -17,6 +17,7 @@ from .engine.pipeline import AnalysisParams
 from .engine.render import thumbnail_jpeg, write_bytes
 from .models import SCAN_DONE, Farm, Farmer, FieldRecord, Hotspot, Report, Scan, now
 from .services.imaging import encode_jpeg, load_rgb
+from .services.routes import latest_route
 from .services.scans import create_scan
 from .storage import field_image_path, public_dir
 
@@ -82,10 +83,11 @@ def ensure_report(session: Session, scan: Scan) -> Report | None:
     farm = session.get(Farm, field.id)  # FieldRecord.id == Farm.id
     farmer = session.get(Farmer, farm.farmer_id)
     hotspots = session.exec(select(Hotspot).where(Hotspot.scan_id == scan.id).order_by(Hotspot.rank)).all()
+    route = latest_route(session, scan.id)
     report_id = f"RPT-{scan.id}-v1"
     out = REPORTS / f"{report_id}.pdf"
     map_img = reports.build_map(field, scan, hotspots)
-    html = reports.build_html(scan, field, farmer, farm, hotspots, map_img, now().strftime("%d %b %Y, %H:%M UTC"))
+    html = reports.build_html(scan, field, farmer, farm, hotspots, route, map_img, now().strftime("%d %b %Y, %H:%M UTC"))
     reports.render_pdf(html, out)
     rep = Report(id=report_id, scan_id=scan.id, farmer_id=farmer.id, version=1, path=str(out))
     session.add(rep)

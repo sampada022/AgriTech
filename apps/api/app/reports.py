@@ -1,31 +1,66 @@
 """Farm health report: one PDF per scan, generated once and stored.
 
 HTML is rendered to PDF by headless Chromium so Kannada text is shaped correctly
-(reportlab does not do complex-script shaping).
+(reportlab does not do complex-script shaping). Every line that matters to a farmer is bilingual
+(English, then Kannada) rather than a handful of translated sentences in an otherwise English page.
 """
 from __future__ import annotations
 
 import base64
 import html
 import io
+import math
 from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from .models import FieldRecord, Hotspot, Scan
+from .models import FieldRecord, Hotspot, Route, Scan
 from .storage import public_dir
 
-TIER_LABEL = {"red": "HIGH priority", "amber": "MEDIUM priority", "grey_blue": "LOW / abiotic"}
+TIER_LABEL = {"red": ("HIGH priority", "ಕೆಂಪು · ಹೆಚ್ಚು ಆದ್ಯತೆ"), "amber": ("MEDIUM priority", "ಅಂಬರ್ · ಮಧ್ಯಮ ಆದ್ಯತೆ"), "grey_blue": ("LOW / abiotic", "ಬೂದು · ಕೀಟವಲ್ಲದಿರಬಹುದು")}
 TIER_COLOR = {"red": "#b91c1c", "amber": "#ca8a04", "grey_blue": "#4b5563"}
 LABEL_TEXT = {
-    None: "Pending",
-    "pest": "Pest damage seen",
-    "disease": "Disease seen",
-    "nutrient": "Nutrient deficiency",
-    "water": "Water stress",
-    "weeds_other": "Weeds / other",
-    "false_alarm": "False alarm (healthy)",
+    None: ("Pending", "ಬಾಕಿ"),
+    "pest": ("Pest damage seen", "ಕೀಟ ಹಾನಿ ಕಂಡಿದೆ"),
+    "disease": ("Disease seen", "ರೋಗ ಕಂಡಿದೆ"),
+    "nutrient": ("Nutrient deficiency", "ಪೋಷಕಾಂಶ ಕೊರತೆ"),
+    "water": ("Water stress", "ನೀರಿನ ಒತ್ತಡ"),
+    "weeds_other": ("Weeds / other", "ಕಳೆ ಅಥವಾ ಇತರೆ"),
+    "false_alarm": ("False alarm (healthy)", "ತಪ್ಪು ಎಚ್ಚರಿಕೆ (ಆರೋಗ್ಯಕರ)"),
 }
+
+# What to do, before any ground confirmation exists -- plain and specific enough to act on without
+# any technical background. Chosen from the tier and, for grey/abiotic hotspots, the pattern hint.
+_WHAT_TO_DO = {
+    "red": (
+        "Walk here first, today. Look under the leaves and in the whorl for insects, eggs or chewed patches.",
+        "ಇಂದು ಮೊದಲು ಇಲ್ಲಿಗೆ ಹೋಗಿ. ಎಲೆಗಳ ಕೆಳಗೆ ಮತ್ತು ಸುಳಿಯಲ್ಲಿ ಕೀಟ, ಮೊಟ್ಟೆ ಅಥವಾ ಕಡಿದ ಗುರುತುಗಳನ್ನು ನೋಡಿ.",
+    ),
+    "amber": (
+        "Check this spot too, after the red ones. Note what you see.",
+        "ಕೆಂಪು ಪ್ರದೇಶಗಳ ನಂತರ ಇದನ್ನೂ ಪರಿಶೀಲಿಸಿ. ಏನು ಕಂಡಿತು ಎಂದು ಗುರುತಿಸಿ.",
+    ),
+    "striping": (
+        "Lines like this usually mean fertiliser or irrigation, not pests. Check your spreader path or drip line here.",
+        "ಇಂತಹ ಗೆರೆಗಳು ಸಾಮಾನ್ಯವಾಗಿ ಗೊಬ್ಬರ ಅಥವಾ ನೀರಾವರಿ ಸಮಸ್ಯೆ, ಕೀಟವಲ್ಲ. ಇಲ್ಲಿ ಗೊಬ್ಬರ ಹರಡುವ ದಾರಿ ಅಥವಾ ಹನಿ ನೀರಾವರಿ ಪರಿಶೀಲಿಸಿ.",
+    ),
+    "large_smooth_zone": (
+        "A broad, smooth patch like this is usually water stress. Check whether irrigation reaches this area.",
+        "ಇಂತಹ ವಿಶಾಲ, ನಯವಾದ ಪ್ರದೇಶ ಸಾಮಾನ್ಯವಾಗಿ ನೀರಿನ ಕೊರತೆ. ಈ ಭಾಗಕ್ಕೆ ನೀರಾವರಿ ತಲುಪುತ್ತಿದೆಯೇ ಪರಿಶೀಲಿಸಿ.",
+    ),
+    "grey_blue": (
+        "Low concern. A quick look is enough; this usually is not a pest.",
+        "ಕಡಿಮೆ ಕಾಳಜಿ. ಒಂದು ಸಣ್ಣ ನೋಟ ಸಾಕು; ಇದು ಸಾಮಾನ್ಯವಾಗಿ ಕೀಟವಲ್ಲ.",
+    ),
+}
+
+
+def _what_to_do(h: Hotspot) -> tuple[str, str]:
+    if h.tier in ("red", "amber"):
+        return _WHAT_TO_DO[h.tier]
+    if h.abiotic_hint in _WHAT_TO_DO:
+        return _WHAT_TO_DO[h.abiotic_hint]
+    return _WHAT_TO_DO["grey_blue"]
 
 
 def _b64(img: Image.Image) -> str:
@@ -53,7 +88,8 @@ def build_map(field: FieldRecord, scan: Scan, hotspots: list[Hotspot]) -> Image.
 
 
 def build_html(
-    scan: Scan, field: FieldRecord, farmer, farm, hotspots: list[Hotspot], map_img: Image.Image, generated: str
+    scan: Scan, field: FieldRecord, farmer, farm, hotspots: list[Hotspot], route: Route | None,
+    map_img: Image.Image, generated: str,
 ) -> str:
     esc = html.escape
     kpis = scan.kpis or {}
@@ -62,15 +98,17 @@ def build_html(
 
     rows = ""
     for i, h in enumerate(hotspots, 1):
-        hint = h.abiotic_hint or "Inspect on the ground to confirm the cause."
+        tier_en, tier_kn = TIER_LABEL.get(h.tier, (h.tier, h.tier))
+        label_en, label_kn = LABEL_TEXT.get(h.label, LABEL_TEXT[None])
+        do_en, do_kn = _what_to_do(h)
         rows += f"""
         <tr>
           <td><b>{i}</b> <span class="muted">{esc(h.id)}</span></td>
-          <td><span class="chip" style="background:{TIER_COLOR.get(h.tier, '#4b5563')}">{TIER_LABEL.get(h.tier, h.tier)}</span></td>
+          <td><span class="chip" style="background:{TIER_COLOR.get(h.tier, '#4b5563')}">{tier_en}</span><br><span class="kn muted">{tier_kn}</span></td>
           <td>{h.area_m2:.0f} m²</td>
           <td>{h.confidence}</td>
-          <td>{esc(hint)}</td>
-          <td>{esc(LABEL_TEXT.get(h.label))}</td>
+          <td>{esc(do_en)}<br><span class="kn">{esc(do_kn)}</span></td>
+          <td>{esc(label_en)}<br><span class="kn muted">{esc(label_kn)}</span></td>
         </tr>"""
 
     area_flagged_m2 = kpis.get("area_flagged_m2", 0.0)
@@ -86,20 +124,49 @@ def build_html(
         )
         finding_kn = (
             f"ನಿಮ್ಮ ಬೆಳೆಯ {area_flagged_pct:.1f}% ಭಾಗದಲ್ಲಿ ({len(hotspots)} ಪ್ರದೇಶಗಳು) "
-            "ಅಸಾಮಾನ್ಯತೆ ಕಂಡುಬಂದಿದೆ. ಹೊಲದಲ್ಲಿ ಪರಿಶೀಲಿಸಿ."
+            "ಅಸಾಮಾನ್ಯತೆ ಕಂಡುಬಂದಿದೆ. ಹೊಲದಲ್ಲಿ ಹೋಗಿ ಪರಿಶೀಲಿಸಿ."
         )
 
     if synthetic:
-        banner = '<div class="demo">DEMO DATA: this report was generated from a synthetic field, not a real survey.</div>'
+        banner = (
+            '<div class="demo">DEMO DATA: this report was generated from a synthetic field, not a real survey.'
+            '<br><span class="kn">ಡೆಮೊ ಡೇಟಾ: ಈ ವರದಿ ಕೃತಕ ಮಾದರಿಯಿಂದ ಮಾಡಲಾಗಿದೆ, ನಿಜವಾದ ಸಮೀಕ್ಷೆಯಲ್ಲ.</span></div>'
+        )
     elif field.data_source == "stand_in":
         banner = (
             '<div class="demo" style="background:#eff6ff;border-color:#3b82f6;color:#1e3a8a">'
             "STAND-IN IMAGERY: shown to demonstrate the pipeline; this field has no ground-verified "
             "pest or disease records."
+            '<br><span class="kn">ಪ್ರಾತ್ಯಕ್ಷಿಕ ಚಿತ್ರ: ಈ ಹೊಲಕ್ಕೆ ಇನ್ನೂ ಹೊಲದಲ್ಲಿ ಖಚಿತಪಡಿಸಿದ ಕೀಟ ಅಥವಾ ರೋಗದ ದಾಖಲೆ ಇಲ್ಲ.</span>'
             "</div>"
         )
     else:
         banner = ""
+
+    # Walking route: stops in order, each leg's distance, total distance and a walking-time estimate.
+    if not route or not route.ordered_hotspot_ids:
+        route_html = (
+            '<p>No spots need an urgent walk today.</p>'
+            '<p class="kn">ಇಂದು ತುರ್ತು ನಡಿಗೆ ಅಗತ್ಯವಿರುವ ಸ್ಥಳಗಳಿಲ್ಲ.</p>'
+        )
+    else:
+        legs = route.leg_distances_m or []
+        stops = ""
+        for i, hotspot_id in enumerate(route.ordered_hotspot_ids):
+            leg = legs[i] if i < len(legs) else 0.0
+            stops += (
+                f'<li>Stop {i + 1} · hotspot {esc(hotspot_id)} <span class="kn muted">· ನಿಲ್ದಾಣ {i + 1}</span>'
+                f'<span class="muted">+{leg:.0f} m</span></li>'
+            )
+        minutes = math.ceil(route.eta_min) if route.eta_min else 0
+        route_html = f"""
+        <ol class="route">
+          <li>Start (field corner) <span class="kn muted">· ಪ್ರಾರಂಭ (ಹೊಲದ ಮೂಲೆ)</span><span class="muted">0 m</span></li>
+          {stops}
+        </ol>
+        <p><b>Total: {route.distance_m:.0f} m, about {minutes} minute(s) walking.</b><br>
+        <span class="kn">ಒಟ್ಟು: {route.distance_m:.0f} ಮೀ, ಸುಮಾರು {minutes} ನಿಮಿಷ ನಡಿಗೆ.</span></p>"""
+
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><style>
     @page {{ size: A4; margin: 14mm; }}
     body {{ font-family: 'Segoe UI','Nirmala UI','Noto Sans Kannada',sans-serif; color:#111827; font-size:11.5px; line-height:1.45; }}
@@ -108,12 +175,14 @@ def build_html(
     .grid {{ display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin:10px 0; }}
     .card {{ border:1px solid #d1d5db; border-radius:6px; padding:8px 10px; }} .card b {{ display:block; font-size:18px; }}
     table {{ width:100%; border-collapse:collapse; margin-top:6px; }} th,td {{ border-bottom:1px solid #e5e7eb; padding:5px 6px; text-align:left; vertical-align:top; }}
-    th {{ background:#f3f4f6; font-size:10.5px; }} .chip {{ color:#fff; border-radius:10px; padding:1px 8px; font-size:10px; font-weight:600; }}
+    th {{ background:#f3f4f6; font-size:10.5px; }} .chip {{ color:#fff; border-radius:10px; padding:1px 8px; font-size:10px; font-weight:600; white-space:nowrap; display:inline-block; }}
     .map {{ display:block; max-width:100%; max-height:92mm; margin:0 auto; border:1px solid #d1d5db; border-radius:6px; }}
     h2 {{ break-after:avoid; }} tr, .warn, .card, .foot {{ break-inside:avoid; }} thead {{ display:table-header-group; }}
     .warn {{ background:#fffbeb; border:1px solid #f59e0b; border-radius:6px; padding:8px 10px; margin-top:12px; }}
     .demo {{ background:#fee2e2; border:1px solid #ef4444; color:#991b1b; padding:6px 10px; border-radius:6px; margin-bottom:8px; font-weight:600; }}
     .kn {{ font-size:13px; }} .foot {{ margin-top:14px; font-size:9.5px; color:#6b7280; }}
+    .route {{ font-family: 'Nirmala UI','Noto Sans Kannada',sans-serif; font-size:11.5px; padding-left:0; list-style:none; }}
+    .route li {{ display:flex; justify-content:space-between; gap:8px; border-bottom:1px solid #e5e7eb; padding:5px 0; }}
     </style></head><body>
     {banner}
     <div class="head"><div><h1>Crop Health Report <span class="muted kn">· ಬೆಳೆ ಆರೋಗ್ಯ ವರದಿ</span></h1>
@@ -122,26 +191,35 @@ def build_html(
 
     <h2>Summary <span class="muted kn">· ಸಾರಾಂಶ</span></h2>
     <div class="grid">
-      <div class="card"><span class="muted">Field area</span><b>{field_area_m2:.0f} m²</b></div>
-      <div class="card"><span class="muted">Areas to inspect</span><b>{len(hotspots)}</b></div>
-      <div class="card"><span class="muted">Suspicious area</span><b>{area_flagged_m2:.0f} m²</b></div>
-      <div class="card"><span class="muted">Share of crop</span><b>{area_flagged_pct:.1f}%</b></div>
+      <div class="card"><span class="muted">Field area <span class="kn">· ಹೊಲದ ವಿಸ್ತೀರ್ಣ</span></span><b>{field_area_m2:.0f} m²</b></div>
+      <div class="card"><span class="muted">Areas to inspect <span class="kn">· ಪರಿಶೀಲಿಸಬೇಕಾದ ಪ್ರದೇಶಗಳು</span></span><b>{len(hotspots)}</b></div>
+      <div class="card"><span class="muted">Suspicious area <span class="kn">· ಸಂಶಯಾಸ್ಪದ ಪ್ರದೇಶ</span></span><b>{area_flagged_m2:.0f} m²</b></div>
+      <div class="card"><span class="muted">Share of crop <span class="kn">· ಬೆಳೆಯ ಶೇಕಡಾ</span></span><b>{area_flagged_pct:.1f}%</b></div>
     </div>
     <p>{esc(finding_en)}</p>
     <p class="kn">{esc(finding_kn)}</p>
 
     <h2>Field map <span class="muted kn">· ಜಮೀನಿನ ನಕ್ಷೆ</span></h2>
     <img class="map" src="{_b64(map_img)}">
-    <div class="muted">Numbered circles mark areas to inspect. Brighter colour means a stronger deviation from this field's normal appearance.</div>
+    <div class="muted">Numbered circles mark areas to inspect. Brighter colour means a stronger deviation from this field's normal appearance.
+    <br><span class="kn">ಸಂಖ್ಯೆಯ ವೃತ್ತಗಳು ಪರಿಶೀಲಿಸಬೇಕಾದ ಪ್ರದೇಶಗಳನ್ನು ತೋರಿಸುತ್ತವೆ. ಹೆಚ್ಚು ಪ್ರಕಾಶಮಾನವಾದ ಬಣ್ಣ ಎಂದರೆ ಈ ಹೊಲದ ಸಾಮಾನ್ಯ ನೋಟಕ್ಕಿಂತ ಹೆಚ್ಚು ವ್ಯತ್ಯಾಸ.</span></div>
 
-    <h2>Areas to inspect <span class="muted kn">· ಪರಿಶೀಲಿಸಬೇಕಾದ ಪ್ರದೇಶಗಳು</span></h2>
-    {"<p>None.</p>" if clear else f'<table><tr><th>#</th><th>Priority</th><th>Area</th><th>Confidence</th><th>What the pattern suggests</th><th>Ground check</th></tr>{rows}</table>'}
+    <h2>Areas to inspect, and what to do <span class="muted kn">· ಪರಿಶೀಲಿಸಬೇಕಾದ ಪ್ರದೇಶಗಳು ಮತ್ತು ಏನು ಮಾಡಬೇಕು</span></h2>
+    {"<p>None.</p>" if clear else f'<table><tr><th>#</th><th>Priority<br><span class="kn">ಆದ್ಯತೆ</span></th><th>Area<br><span class="kn">ವಿಸ್ತೀರ್ಣ</span></th><th>Confidence<br><span class="kn">ವಿಶ್ವಾಸ</span></th><th>What to do<br><span class="kn">ಏನು ಮಾಡಬೇಕು</span></th><th>Ground check<br><span class="kn">ಹೊಲದ ಪರಿಶೀಲನೆ</span></th></tr>{rows}</table>'}
+
+    <h2>Suggested walking route <span class="muted kn">· ನಡೆಯುವ ಮಾರ್ಗ ಸೂಚನೆ</span></h2>
+    <p class="muted">Shortest path to the red and amber spots, starting from a field corner.
+    <br><span class="kn">ಕೆಂಪು ಮತ್ತು ಅಂಬರ್ ಸ್ಥಳಗಳಿಗೆ ಅತ್ಯಂತ ಕಡಿಮೆ ದಾರಿ, ಹೊಲದ ಮೂಲೆಯಿಂದ ಪ್ರಾರಂಭ.</span></p>
+    {route_html}
 
     <div class="warn"><b>Important.</b> Hotspots indicate potential crop anomalies and require field verification. They are not a diagnosis.<br>
       <span class="kn">ಇವು ಸಂಭವನೀಯ ಸಮಸ್ಯೆ ಪ್ರದೇಶಗಳು ಮಾತ್ರ. ಕೀಟ ಅಥವಾ ರೋಗವನ್ನು ಖಚಿತಪಡಿಸಲು ಹೊಲದಲ್ಲಿ ಪರಿಶೀಲನೆ ಅಗತ್ಯ.</span></div>
     <div class="foot">Priority shows how urgently to inspect, not how severe a disease is. Confidence reflects image quality, agreement between the
       texture and vegetation-index signals, and area size; it is not a probability of damage.
-      Kannada text is illustrative and pending review by a Kannada-speaking agricultural expert.</div>
+      <br><span class="kn">ಆದ್ಯತೆ ಎಷ್ಟು ತುರ್ತಾಗಿ ಪರಿಶೀಲಿಸಬೇಕು ಎಂಬುದನ್ನು ತೋರಿಸುತ್ತದೆ, ರೋಗದ ತೀವ್ರತೆಯನ್ನಲ್ಲ. ವಿಶ್ವಾಸವು ಚಿತ್ರದ ಗುಣಮಟ್ಟ, ನಾರು ಮತ್ತು ಹಸಿರಿನ
+      ಸೂಚಕಗಳ ಒಪ್ಪಿಗೆ ಮತ್ತು ಪ್ರದೇಶದ ಗಾತ್ರವನ್ನು ಆಧರಿಸಿದೆ; ಇದು ಹಾನಿಯ ಸಂಭವನೀಯತೆ ಅಲ್ಲ.</span>
+      <br>Kannada text has had a careful pass but still needs review by a Kannada-speaking agricultural expert before real use.
+      <br><span class="kn">ಕನ್ನಡ ಪಠ್ಯವನ್ನು ಎಚ್ಚರಿಕೆಯಿಂದ ಬರೆಯಲಾಗಿದೆ, ಆದರೆ ನಿಜವಾದ ಬಳಕೆಗೆ ಮೊದಲು ಕನ್ನಡ ಮಾತನಾಡುವ ಕೃಷಿ ತಜ್ಞರು ಪರಿಶೀಲಿಸಬೇಕು.</span></div>
     </body></html>"""
 
 

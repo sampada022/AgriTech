@@ -149,6 +149,81 @@ class AnthropicProvider:
         return parsed
 
 
+class GeminiProvider:
+    """Google Gemini vision, used instead of Anthropic when DIAGNOSIS_PROVIDER=gemini."""
+
+    name = "gemini"
+
+    def __init__(self, settings: Settings):
+        import google.genai as genai
+
+        self.model = settings.gemini_model
+        self.api_key = settings.gemini_api_key
+        self.timeout_ms = settings.diagnosis_timeout_s * 1000
+        self.retries = settings.diagnosis_retries
+        self.client = genai.Client(api_key=self.api_key or None)
+
+    def diagnose(self, image_jpeg: bytes, context: DiagnosisContext) -> LeafDiagnosis:
+        import time
+
+        import google.genai.errors as genai_errors
+        from google.genai import types
+
+        if not self.api_key:
+            raise DiagnosisUnavailable("no_credentials")
+
+        attempts = self.retries + 1
+        last_unavailable: DiagnosisUnavailable | None = None
+        for attempt in range(attempts):
+            try:
+                response = self.client.models.generate_content(
+                    model=self.model,
+                    contents=[
+                        _user_text(context),
+                        types.Part.from_bytes(data=image_jpeg, mime_type="image/jpeg"),
+                    ],
+                    config=types.GenerateContentConfig(
+                        system_instruction=SYSTEM_PROMPT,
+                        response_mime_type="application/json",
+                        response_json_schema=LeafDiagnosis.model_json_schema(),
+                        http_options=types.HttpOptions(timeout=int(self.timeout_ms)),
+                    ),
+                )
+                break
+            except genai_errors.ClientError as exc:
+                status = getattr(exc, "code", None)
+                if status == 401 or status == 403:
+                    raise DiagnosisUnavailable("authentication") from exc
+                if status == 429 and attempt < attempts - 1:
+                    last_unavailable = DiagnosisUnavailable("rate_limited")
+                    time.sleep(1.5 * (attempt + 1))
+                    continue
+                if status == 429:
+                    raise DiagnosisUnavailable("rate_limited") from exc
+                raise DiagnosisUnavailable(f"api_status_{status}") from exc
+            except genai_errors.ServerError as exc:
+                # The free tier returns 503 "high demand" often enough that one retry is worth it.
+                if attempt < attempts - 1:
+                    last_unavailable = DiagnosisUnavailable(f"api_status_{getattr(exc, 'code', 'server')}")
+                    time.sleep(1.5 * (attempt + 1))
+                    continue
+                raise DiagnosisUnavailable(f"api_status_{getattr(exc, 'code', 'server')}") from exc
+            except genai_errors.APIError as exc:
+                raise DiagnosisUnavailable(f"api_status_{getattr(exc, 'code', 'unknown')}") from exc
+            except Exception as exc:  # noqa: BLE001  (network/timeout errors from the underlying httpx client)
+                raise DiagnosisUnavailable("connection") from exc
+        else:
+            raise last_unavailable or DiagnosisUnavailable("unexpected_error")
+
+        text = getattr(response, "text", None)
+        if not text:
+            raise DiagnosisUnavailable("no_parsed_output")
+        try:
+            return LeafDiagnosis.model_validate_json(text)
+        except ValidationError as exc:
+            raise DiagnosisUnavailable("schema_validation") from exc
+
+
 # Replies for demo mode when forced or when the API fails. They carry the source "canned", so the
 # UI can say this is a stand-in and not an analysis of the photo in front of it.
 _CANNED: dict[str, dict] = {
@@ -253,4 +328,6 @@ class CannedProvider:
 def build_provider(settings: Settings) -> DiagnosisProvider | None:
     if settings.diagnosis_provider == "anthropic":
         return AnthropicProvider(settings)
+    if settings.diagnosis_provider == "gemini":
+        return GeminiProvider(settings)
     return None

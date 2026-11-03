@@ -77,8 +77,10 @@ def health(session: Session = Depends(get_session)) -> dict:
         "database": database,
         "llm": {
             "provider": settings.diagnosis_provider,
-            "model": settings.diagnosis_model,
-            "api_key_set": bool(settings.anthropic_api_key),
+            "model": settings.gemini_model if settings.diagnosis_provider == "gemini" else settings.diagnosis_model,
+            "api_key_set": bool(
+                settings.gemini_api_key if settings.diagnosis_provider == "gemini" else settings.anthropic_api_key
+            ),
             "reachable": _probe.state["llm"],
         },
         "basemap": {"url": settings.basemap_url, "reachable": _probe.state["basemap"]},
