@@ -59,6 +59,7 @@ export default function ScanDetail({ id }: { id: string }) {
       <p className="no-print label mono mb-3"><a href="#/dashboard/scans" className="link-u text-muted">Fields</a> <span className="text-muted">/</span> {scan.id}</p>
       <PageTitle sub={`${fmtDate(scan.created_at ?? '')} · ${scan.data_source_badge} · field ${scan.field_id}`}
         action={<div className="no-print flex flex-wrap gap-2">
+          <a className={btn} href={`/api/scans/${scan.id}/report`} target="_blank" rel="noreferrer"><Download size={14} strokeWidth={1.5} />PDF report</a>
           <a className={btn} href={scansApi.exportUrl(scan.id, 'csv')}><Download size={14} strokeWidth={1.5} />CSV</a>
           <a className={btn} href={scansApi.exportUrl(scan.id, 'geojson')}><FileJson size={14} strokeWidth={1.5} />GeoJSON</a>
           <button className={btn} onClick={() => window.print()}><Printer size={14} strokeWidth={1.5} />Print report</button>

@@ -1,4 +1,4 @@
-import { Search } from 'lucide-react'
+import { Download, Search } from 'lucide-react'
 import { useState } from 'react'
 import NewScanForm from './NewScanForm'
 import { useStore } from './store'
@@ -28,7 +28,15 @@ export default function Scans() {
                       <a href={href ?? '#'} className="link-u font-display text-lg font-semibold">{f.name}</a>
                       <p className="label mono mt-1 text-muted">{f.id} · {f.created_at ? fmtDate(f.created_at) : '—'} · {f.data_source_badge}</p>
                       <p className="mono mt-3 text-sm">{f.latest_scan ? `${f.latest_scan.status} · ${f.latest_scan.hotspot_count ?? 0} hotspot${f.latest_scan.hotspot_count === 1 ? '' : 's'}` : 'No scan yet'}</p>
-                      <div className="mt-2 flex flex-wrap gap-2">{(['red', 'amber', 'grey_blue'] as const).filter((k) => (tiers[k] ?? 0) > 0).map((k) => <span key={k} className="inline-flex items-center gap-1"><TierChip s={k} /><span className="mono text-sm">×{tiers[k]}</span></span>)}</div>
+                      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap gap-2">{(['red', 'amber', 'grey_blue'] as const).filter((k) => (tiers[k] ?? 0) > 0).map((k) => <span key={k} className="inline-flex items-center gap-1"><TierChip s={k} /><span className="mono text-sm">×{tiers[k]}</span></span>)}</div>
+                        {scanId && f.latest_scan?.status === 'done' && (
+                          <a href={`/api/scans/${scanId}/report`} target="_blank" rel="noreferrer"
+                            className="label mono inline-flex items-center gap-1.5 rounded-ctl border border-line px-2.5 py-1.5 text-xs hover:bg-bg">
+                            <Download size={13} strokeWidth={1.5} />PDF report
+                          </a>
+                        )}
+                      </div>
                     </div></li>) })}
             </ul>)}
         </div>

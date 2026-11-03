@@ -5,8 +5,10 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Response
+from fastapi.responses import FileResponse
 from sqlmodel import Session
 
+from app import ingest
 from app.db import get_session
 from app.errors import ApiError, not_found
 from app.models import SCAN_CANCELLED, SCAN_DONE, SCAN_FAILED, FieldRecord, Scan
@@ -84,6 +86,21 @@ def cancel_scan(scan_id: str, session: Session = Depends(get_session)) -> dict:
         session.add(scan)
         session.commit()
     return scan_payload(scan, field)
+
+
+@router.get(
+    "/scans/{scan_id}/report",
+    summary="Download the farmer-facing PDF report for this scan",
+    description="Builds it the first time it's asked for, then serves the cached file. Works for "
+    "every field, including Studio-only demo ones with no farmer attached.",
+)
+def get_scan_report(scan_id: str, session: Session = Depends(get_session)) -> FileResponse:
+    scan, field = load_scan(session, scan_id)
+    _require_done(scan)
+    path = ingest.ensure_report_any(session, scan)
+    if path is None:
+        raise ApiError(409, "report_unavailable", "The report could not be generated.", "Try again.")
+    return FileResponse(path, media_type="application/pdf", filename=f"{field.name}-report.pdf")
 
 
 @router.get(

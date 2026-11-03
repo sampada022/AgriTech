@@ -95,6 +95,36 @@ def ensure_report(session: Session, scan: Scan) -> Report | None:
     return rep
 
 
+def ensure_report_any(session: Session, scan: Scan) -> Path | None:
+    """Like ensure_report, but also works for Studio-only fields that have no Farm/Farmer attached
+    (synthetic demo fields created straight through the Studio API, not through start_survey()).
+
+    Used by the dashboard's "download PDF" button, which must work for every field. Farmer-linked
+    fields just delegate to ensure_report() so the normal Report row/cache is unaffected; fields
+    with no farmer get a stand-in name/village on the PDF and are cached by file path only -- no
+    Report row, since Report.farmer_id is a real foreign key and there is no Farmer to point at.
+    """
+    if scan.status != SCAN_DONE:
+        return None
+    field = session.get(FieldRecord, scan.field_id)
+    farm = session.get(Farm, field.id)
+    if farm is not None:
+        rep = ensure_report(session, scan)
+        return Path(rep.path) if rep else None
+
+    out = REPORTS / f"RPT-{scan.id}-v1.pdf"
+    if out.exists():
+        return out
+    farm = Farm(id=field.id, farmer_id="STUDIO", name=field.name, crop=field.crop)
+    farmer = Farmer(id="STUDIO", name="AeroScout Field Team", village=field.name, language="en", mobile="")
+    hotspots = session.exec(select(Hotspot).where(Hotspot.scan_id == scan.id).order_by(Hotspot.rank)).all()
+    route = latest_route(session, scan.id)
+    map_img = reports.build_map(field, scan, hotspots)
+    html = reports.build_html(scan, field, farmer, farm, hotspots, route, map_img, now().strftime("%d %b %Y, %H:%M UTC"))
+    reports.render_pdf(html, out)
+    return out
+
+
 def notify_survey(session: Session, scan: Scan) -> dict:
     """SMS the farmer that the survey is done (Kannada or English, crop-aware). Mock gateway in the prototype."""
     from . import security as sec

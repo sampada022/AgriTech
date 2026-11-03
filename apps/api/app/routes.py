@@ -17,6 +17,7 @@ from .models import (
     Observation, Operator, Report, Scan, SessionToken, SmsMessage, new_id, now,
 )
 from .services.model import confirm_observation
+from .services.serialize import iso
 from .services.serialize import latest_scan as _latest_scan
 from .sms import notify_text, otp_text, provider
 from .storage import public_dir
@@ -454,7 +455,11 @@ def dev_sms(mobile: str, session: Session = Depends(get_session)):
     if not DEMO_MODE:
         raise HTTPException(404, "Not found")
     msgs = session.exec(select(SmsMessage).where(SmsMessage.to_mobile == mobile).order_by(SmsMessage.pk.desc())).all()[:20]
-    return [m.model_dump(mode="json") for m in msgs]
+    # SQLite drops the timezone on round-trip, so the raw dump below has no offset. JS's `new
+    # Date(...)` treats an offset-less string as LOCAL time, not UTC -- stamping it wrong by
+    # the viewer's UTC offset, which is why "just sent" polling on the landing-page demo never
+    # found a message that had in fact just arrived. iso() makes the UTC explicit.
+    return [{**m.model_dump(mode="json"), "at": iso(m.at)} for m in msgs]
 
 
 # ---------------------------------------------------------------- dev: the website's "see it as a farmer" demo
