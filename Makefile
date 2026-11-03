@@ -4,7 +4,7 @@ PYTEST = C:\tools\python311\Scripts\pytest.exe
 NODE = C:\tools\node_full\node-v20.15.0-win-x64\node.exe
 NPM = C:\tools\node_full\node-v20.15.0-win-x64\npm.cmd
 
-.PHONY: dev dev-api dev-web demo test seed reset health
+.PHONY: dev dev-api dev-web demo test seed reset health docker-build docker-run
 
 dev-api:
 	cd apps/api && $(UVICORN) app.main:app --host 0.0.0.0 --port 8000 --reload
@@ -29,4 +29,12 @@ reset:
 
 health:
 	$(PYTHON) -c "import urllib.request, json; res = urllib.request.urlopen('http://localhost:8000/api/health'); print(json.dumps(json.loads(res.read()), indent=2))"
+
+
+# -- Docker / Railway -----------------------------------------------------------
+docker-build:
+	docker build -t aeroscout .
+
+docker-run:
+	docker run -p 8000:8000 -v "$(pwd)/data:/app/data" --env-file .env aeroscout
 

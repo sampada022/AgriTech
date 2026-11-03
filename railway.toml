@@ -1,0 +1,14 @@
+# railway.toml — tells Railway how to build and run AeroScout
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/api/health"
+healthcheckTimeout = 60
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
+
+# Mount a persistent volume at /app/data so the SQLite DB, generated images,
+# and PDF reports survive redeploys. Create this volume in Railway dashboard:
+#   Settings → Volumes → Add Volume → Mount path: /app/data
