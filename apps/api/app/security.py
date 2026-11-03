@@ -5,7 +5,7 @@ import hashlib
 import hmac
 import os
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta, timezone
 
 from .models import now
 

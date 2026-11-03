@@ -1,88 +1,94 @@
-"""Survey-day simulation: three farms get a new survey from REAL imagery, one untouched and two with SIMULATED stress.
+"""Survey-day simulation: three farms get a new survey from a synthetic field each.
 
-Imagery comes from `agriscout_ml.simulate` (healthy research-station site of the Thai UAV rice dataset, CC BY 4.0).
-The stress patches in farms 2 and 3 are injected, not real pest damage; that is recorded in each survey's
-metadata and repeated in the UI and PDF. Prepare the imagery once with:
-  uv run python -m agriscout_ml.simulate data/raw/sim --train data/models/sim_rice.pt
+Uses the engine's own synthetic generator (same one behind the Studio's demo scenarios), so this
+needs no external dataset. The "stress" is generated, not real pest damage; every screen and PDF
+says so via the field's data_source ("synthetic").
 """
 from __future__ import annotations
 
-import json
-import shutil
+import time
 from pathlib import Path
 
 from fastapi import BackgroundTasks, HTTPException
 from sqlmodel import Session, select
 
-from .db import RAW, RUNS, SIM_MODEL_PATH
-from .ingest import analyze_background
-from .models import AccessLog, AccessRequest, Farm, Farmer, Hotspot, Report, SmsMessage, Survey
-
-STAGES = [
-    ("received", "Imagery received"),
-    ("quality", "Quality and alignment checks"),
-    ("index", "Vegetation-index analysis"),
-    ("visual", "Visual texture check (experimental)"),
-    ("hotspots", "Hotspot extraction"),
-    ("render", "Maps and layers"),
-    ("report", "PDF report generated"),
-    ("done", "Farmer notified by SMS"),
-]
+from . import ingest
+from .db import new_session
+from .engine.pipeline import AnalysisParams
+from .engine.render import thumbnail_jpeg, write_bytes
+from .engine.simulator import SimConfig, simulate
+from .models import SCAN_DONE, SCAN_FAILED, AccessLog, AccessRequest, Farm, Farmer, FieldRecord, Hotspot, Report, Scan, SmsMessage
+from .services.imaging import encode_jpeg
+from .services.scans import create_scan
+from .services.serialize import latest_scan as _latest_scan
+from .storage import field_image_path, public_dir, remove_scan_files
 
 SIM_FARMS = [
-    {"farm_id": "FARM-101", "farmer_id": "MDY-003", "name": "Pandavapura Paddy Plot", "dir": "sim/sim_a"},
-    {"farm_id": "FARM-102", "farmer_id": "MDY-001", "name": "Kikkeri Paddy Plot B", "dir": "sim/sim_b"},
-    {"farm_id": "FARM-103", "farmer_id": "MDY-002", "name": "Maddur Paddy Plot 2", "dir": "sim/sim_c"},
+    {"farm_id": "FARM-101", "farmer_id": "MDY-003", "name": "Pandavapura Paddy Plot", "scenario": "healthy", "seed": 11},
+    {"farm_id": "FARM-102", "farmer_id": "MDY-001", "name": "Kikkeri Paddy Plot B", "scenario": "pest", "seed": 7},
+    {"farm_id": "FARM-103", "farmer_id": "MDY-002", "name": "Maddur Paddy Plot 2", "scenario": "mixed", "seed": 18},
 ]
-PREPARE_CMD = "uv run python -m agriscout_ml.simulate data/raw/sim --train data/models/sim_rice.pt"
 
 
-def _sid(farm_id: str) -> str:
-    return f"{farm_id}-S01"
+def _run_one(f: dict) -> None:
+    with new_session() as session:
+        session.merge(Farm(id=f["farm_id"], farmer_id=f["farmer_id"], name=f["name"], crop="Paddy"))
+        session.commit()
+        farm = session.get(Farm, f["farm_id"])
+
+        sim = simulate(SimConfig(scenario=f["scenario"], difficulty="medium", seed=f["seed"]))
+        target = field_image_path(farm.id)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(encode_jpeg(sim.image, 92, full_chroma=True))
+
+        thumb_relative = f"{farm.id}/thumb.jpg"
+        write_bytes(public_dir() / thumb_relative, thumbnail_jpeg(sim.image))
+
+        height, width = sim.image.shape[:2]
+        field = FieldRecord(
+            id=farm.id, name=farm.name, crop=farm.crop, data_source="synthetic",
+            sw_lat=sim.bounds.sw_lat, sw_lon=sim.bounds.sw_lon, ne_lat=sim.bounds.ne_lat, ne_lon=sim.bounds.ne_lon,
+            image_path=str(target), thumbnail_path=thumb_relative, image_width=width, image_height=height,
+            gsd_cm=sim.config.gsd_m * 100,
+        )
+        session.add(field)
+        session.commit()
+        scan = create_scan(session, field, AnalysisParams())  # queues it on the engine's worker thread
+        scan_id = scan.id
+
+    # create_scan returns immediately (queued); wait here so this background task can notify once done.
+    for _ in range(600):  # up to ~5 minutes
+        with new_session() as session:
+            scan = session.get(Scan, scan_id)
+            if scan and scan.status in (SCAN_DONE, SCAN_FAILED):
+                if scan.status == SCAN_DONE:
+                    ingest.ensure_report(session, scan)
+                    ingest.notify_survey(session, scan)
+                return
+        time.sleep(0.5)
 
 
 def missing_inputs() -> list[str]:
-    miss = [f["dir"] for f in SIM_FARMS if not (RAW / f["dir"] / "rgb.tif").exists()]
-    if not SIM_MODEL_PATH.exists():
-        miss.append(SIM_MODEL_PATH.name)
-    return miss
-
-
-def _run_all(farms: list[dict]) -> None:
-    for f in farms:  # one after another: CPU-bound, and SQLite is single-writer
-        analyze_background(_sid(f["farm_id"]), str(RAW / f["dir"]), model_path=SIM_MODEL_PATH, notify=True)
+    return []  # the synthetic generator needs no external dataset
 
 
 def start(session: Session, bg: BackgroundTasks) -> dict:
-    miss = missing_inputs()
-    if miss:
-        raise HTTPException(409, f"Simulation imagery not prepared ({', '.join(miss)}). Run: {PREPARE_CMD}")
     ids = [f["farm_id"] for f in SIM_FARMS]
-    if session.exec(select(Survey).where(Survey.farm_id.in_(ids))).first():
+    if session.exec(select(Scan).where(Scan.field_id.in_(ids))).first():
         raise HTTPException(409, "A simulation already exists. Reset it first.")
     for f in SIM_FARMS:
         if not session.get(Farmer, f["farmer_id"]):
             raise HTTPException(409, f"Farmer {f['farmer_id']} is missing. Run the seed first.")
-        session.merge(Farm(id=f["farm_id"], farmer_id=f["farmer_id"], name=f["name"], crop="Paddy"))
-    session.commit()
     for f in SIM_FARMS:
-        session.add(Survey(id=_sid(f["farm_id"]), farm_id=f["farm_id"], status="PROCESSING", stage="received", data_source="pending"))
-    session.commit()
-    bg.add_task(_run_all, SIM_FARMS)
-    return {"started": [_sid(f["farm_id"]) for f in SIM_FARMS]}
-
-
-def _survey_meta(dir_: str) -> dict:
-    p = RAW / dir_ / "survey.json"
-    return json.loads(p.read_text()) if p.exists() else {}
+        bg.add_task(_run_one, f)
+    return {"started": [f["farm_id"] for f in SIM_FARMS]}
 
 
 def status(session: Session) -> dict:
     out = []
     for f in SIM_FARMS:
         farmer = session.get(Farmer, f["farmer_id"])
-        sv = session.get(Survey, _sid(f["farm_id"]))
-        planted = _survey_meta(f["dir"]).get("planted") or []
+        scan = _latest_scan(session, f["farm_id"])
         row = {
             "farm_id": f["farm_id"],
             "farm_name": f["name"],
@@ -91,64 +97,42 @@ def status(session: Session) -> dict:
             "village": farmer.village if farmer else None,
             "language": farmer.language if farmer else None,
             "access_mode": farmer.access_mode if farmer else None,
-            "input": {
-                "source": "Real UAV orthomosaic of a rice research station (Thai UAV rice dataset, CC BY 4.0)",
-                "simulated_stress": bool(planted),
-                "planted_patches": [
-                    {"name": p.get("name"), "radius_m": p.get("radius_m"), "severity": p.get("severity")} for p in planted
-                ],
-            },
-            "survey_id": sv.id if sv else None,
-            "status": sv.status if sv else "NOT_STARTED",
-            "stage": sv.stage if sv else "",
-            "error": sv.error if sv else None,
+            "input": {"source": "Synthetic field, generated by the engine's own simulator", "simulated_stress": True},
+            "survey_id": scan.id if scan else None,
+            "status": scan.status if scan else "not_started",
+            "stage": scan.stage if scan else "",
+            "progress": scan.progress if scan else 0,
+            "error": scan.error if scan else None,
             "result": None,
         }
-        if sv and sv.status == "COMPLETED":
-            sm = sv.summary or {}
-            res = sm.get("summary") or {}
-            chk = sm.get("synthetic_check") or {}
-            rep = session.exec(select(Report).where(Report.survey_id == sv.id).order_by(Report.version.desc())).first()
+        if scan and scan.status == SCAN_DONE:
+            kpis = scan.kpis or {}
+            rep = session.exec(select(Report).where(Report.scan_id == scan.id).order_by(Report.version.desc())).first()
             sms = session.exec(
                 select(SmsMessage).where(
-                    SmsMessage.to_mobile == farmer.mobile, SmsMessage.kind == "NOTIFY", SmsMessage.at >= sv.created_at
+                    SmsMessage.to_mobile == farmer.mobile, SmsMessage.kind == "NOTIFY", SmsMessage.at >= scan.created_at
                 )
             ).first()
-            patches = chk.get("patches", [])
             row["result"] = {
-                "hotspots": res.get("hotspots_detected"),
-                "suspicious_percent": res.get("suspicious_area_percent"),
-                "valid_crop_area_sqm": res.get("valid_crop_area_sqm"),
-                "status": res.get("status"),
-                "patches_found": sum(1 for p in patches if p.get("detected")) if chk else None,
-                "patches_total": len(patches) if chk else None,
-                "pixel_recall": chk.get("pixel_recall"),
-                "pixel_precision": chk.get("pixel_precision"),
+                "hotspots": kpis.get("hotspot_count"),
+                "suspicious_percent": kpis.get("area_flagged_pct"),
+                "valid_crop_area_sqm": kpis.get("field_area_m2"),
                 "report_id": rep.id if rep else None,
                 "notified": sms is not None,
                 "sms": sms.body if sms else None,
             }
         out.append(row)
-    started = any(r["status"] != "NOT_STARTED" for r in out)
-    # COMPLETED is set when hotspots are stored, before the PDF is built and the SMS sent: finished means stage "done".
-    finished = started and all(r["status"] == "FAILED" or (r["status"] == "COMPLETED" and r["stage"] == "done") for r in out)
-    miss = missing_inputs()
-    return {
-        "stages": [{"key": k, "label": lbl} for k, lbl in STAGES],
-        "farms": out,
-        "started": started,
-        "finished": finished,
-        "ready": not miss,
-        "missing": miss,
-        "prepare_command": PREPARE_CMD,
-    }
+    started = any(r["status"] != "not_started" for r in out)
+    finished = started and all(r["status"] in (SCAN_FAILED, SCAN_DONE) for r in out)
+    return {"farms": out, "started": started, "finished": finished, "ready": True, "missing": []}
 
 
 def reset(session: Session) -> dict:
-    ids = [_sid(f["farm_id"]) for f in SIM_FARMS]
-    surveys = [s for s in (session.get(Survey, i) for i in ids) if s]
-    first = min((s.created_at for s in surveys), default=None)
-    reports = session.exec(select(Report).where(Report.survey_id.in_(ids))).all()
+    ids = [f["farm_id"] for f in SIM_FARMS]  # field_id == farm_id for simulated farms
+    scans = session.exec(select(Scan).where(Scan.field_id.in_(ids))).all()
+    scan_ids = [s.id for s in scans]
+    first = min((s.created_at for s in scans), default=None)
+    reports = session.exec(select(Report).where(Report.scan_id.in_(scan_ids))).all() if scan_ids else []
     rep_ids = [r.id for r in reports]
     for model, col in ((AccessLog, AccessLog.report_id), (AccessRequest, AccessRequest.report_id)):
         for row in session.exec(select(model).where(col.in_(rep_ids))).all():
@@ -156,22 +140,27 @@ def reset(session: Session) -> dict:
     for r in reports:
         Path(r.path).unlink(missing_ok=True)
         session.delete(r)
-    for h in session.exec(select(Hotspot).where(Hotspot.survey_id.in_(ids))).all():
-        session.delete(h)
+    if scan_ids:
+        for h in session.exec(select(Hotspot).where(Hotspot.scan_id.in_(scan_ids))).all():
+            session.delete(h)
     if first is not None:
         mobiles = [m.mobile for m in (session.get(Farmer, f["farmer_id"]) for f in SIM_FARMS) if m]
         for m in session.exec(
             select(SmsMessage).where(SmsMessage.to_mobile.in_(mobiles), SmsMessage.kind == "NOTIFY", SmsMessage.at >= first)
         ).all():
             session.delete(m)
-    for s in surveys:
+    for s in scans:
         session.delete(s)
+    for i in ids:
+        field = session.get(FieldRecord, i)
+        if field:
+            session.delete(field)
     session.commit()
     for f in SIM_FARMS:  # farms go too, so dashboards return to their pre-simulation state
         farm = session.get(Farm, f["farm_id"])
         if farm:
             session.delete(farm)
     session.commit()
-    for i in ids:
-        shutil.rmtree(RUNS / i, ignore_errors=True)
+    for i in scan_ids:
+        remove_scan_files(i)
     return {"reset": True}

@@ -1,101 +1,112 @@
-"""Run the ML pipeline for a survey, store results, generate the report once."""
+"""Start a new farmer survey on the real engine, and the farmer-facing report/notify glue.
+
+A Farm's plot is tracked as one FieldRecord (same id as the Farm), reused across repeated surveys;
+each survey is a Scan. The PDF report is built lazily, the first time it's asked for after the scan
+finishes, rather than eagerly from a completion hook.
+"""
 from __future__ import annotations
 
-import json
-import traceback
 from pathlib import Path
 
 from sqlmodel import Session, select
 
 from . import reports
-from .db import MODEL_PATH, REPORTS, RUNS, engine
-from .models import Farm, Farmer, Hotspot, Report, Survey, now
+from .db import REPORTS
+from .engine.geo import bounds_from_centre
+from .engine.pipeline import AnalysisParams
+from .engine.render import thumbnail_jpeg, write_bytes
+from .models import SCAN_DONE, Farm, Farmer, FieldRecord, Hotspot, Report, Scan, now
+from .services.imaging import encode_jpeg, load_rgb
+from .services.scans import create_scan
+from .storage import field_image_path, public_dir
+
+# Mandya-area reference point, used when a sample/upload carries no real GPS bounds.
+DEFAULT_LAT = 12.5240
+DEFAULT_LON = 76.9000
 
 
-def ingest_run(session: Session, survey: Survey, run_dir: Path) -> Report:
-    """Load a finished pipeline run into the DB and generate its report."""
-    summary = json.loads((run_dir / "summary.json").read_text())
-    geo = json.loads((run_dir / "hotspots.geojson").read_text())
+def ensure_field(session: Session, farm: Farm, image_path: Path, gsd_cm: float, data_source: str = "real") -> FieldRecord:
+    """One FieldRecord per farm (same id), reused across repeated surveys; its base image is replaced each time."""
+    rgb = load_rgb(image_path)
+    height, width = rgb.shape[:2]
+    target = field_image_path(farm.id)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(encode_jpeg(rgb, 92, full_chroma=True))
 
-    for old in session.exec(select(Hotspot).where(Hotspot.survey_id == survey.id)).all():
-        session.delete(old)
-    for f in geo["features"]:
-        props = dict(f["properties"])
-        session.add(Hotspot(survey_id=survey.id, hotspot_id=props["hotspot_id"], props=props, geometry=f["geometry"]))
+    # Thumbnail lives under the public root (served at /files/...); the original field photo
+    # under the private root never is.
+    thumb_relative = f"{farm.id}/thumb.jpg"
+    write_bytes(public_dir() / thumb_relative, thumbnail_jpeg(rgb))
 
-    survey.summary = summary
-    survey.run_dir = str(run_dir)
-    survey.data_source = summary.get("data_source", "real")
-    survey.status = "COMPLETED"
-    survey.error = None
-    session.add(survey)
+    width_m = width * gsd_cm / 100
+    height_m = height * gsd_cm / 100
+    bounds = bounds_from_centre(DEFAULT_LAT, DEFAULT_LON, width_m, height_m)
+
+    field = session.get(FieldRecord, farm.id)
+    if field is None:
+        field = FieldRecord(
+            id=farm.id, name=farm.name, crop=farm.crop, data_source=data_source,
+            sw_lat=bounds.sw_lat, sw_lon=bounds.sw_lon, ne_lat=bounds.ne_lat, ne_lon=bounds.ne_lon,
+            image_path=str(target), thumbnail_path=thumb_relative, image_width=width, image_height=height,
+            gsd_cm=gsd_cm,
+        )
+    else:
+        field.name, field.crop, field.data_source = farm.name, farm.crop, data_source
+        field.sw_lat, field.sw_lon = bounds.sw_lat, bounds.sw_lon
+        field.ne_lat, field.ne_lon = bounds.ne_lat, bounds.ne_lon
+        field.image_path, field.thumbnail_path = str(target), thumb_relative
+        field.image_width, field.image_height, field.gsd_cm = width, height, gsd_cm
+    session.add(field)
     session.commit()
-    return make_report(session, survey)
+    session.refresh(field)
+    return field
 
 
-def make_report(session: Session, survey: Survey) -> Report:
-    farm = session.get(Farm, survey.farm_id)
+def start_survey(session: Session, farm_id: str, image_path: Path, gsd_cm: float = 3.0, data_source: str = "real") -> Scan:
+    """Create/refresh the farm's FieldRecord and queue a new scan. Runs on Preet's own worker thread."""
+    farm = session.get(Farm, farm_id)
+    if farm is None:
+        raise ValueError(f"Unknown farm {farm_id}")
+    field = ensure_field(session, farm, image_path, gsd_cm, data_source)
+    return create_scan(session, field, AnalysisParams())
+
+
+def ensure_report(session: Session, scan: Scan) -> Report | None:
+    """Build the farmer PDF the first time it's asked for after the scan finishes."""
+    if scan.status != SCAN_DONE:
+        return None
+    existing = session.exec(select(Report).where(Report.scan_id == scan.id)).first()
+    if existing is not None and Path(existing.path).exists():
+        return existing
+    field = session.get(FieldRecord, scan.field_id)
+    farm = session.get(Farm, field.id)  # FieldRecord.id == Farm.id
     farmer = session.get(Farmer, farm.farmer_id)
-    hs = session.exec(select(Hotspot).where(Hotspot.survey_id == survey.id).order_by(Hotspot.hotspot_id)).all()
-    hs_dicts = [{"props": h.props, "verdict": h.verdict} for h in hs]
-    run_dir = Path(survey.run_dir)
-
-    existing = session.exec(select(Report).where(Report.survey_id == survey.id)).all()
-    version = max((r.version for r in existing), default=0) + 1
-    report_id = f"RPT-{survey.id}-v{version}"
+    hotspots = session.exec(select(Hotspot).where(Hotspot.scan_id == scan.id).order_by(Hotspot.rank)).all()
+    report_id = f"RPT-{scan.id}-v1"
     out = REPORTS / f"{report_id}.pdf"
-
-    map_img = reports.build_map(run_dir, survey.summary, hs_dicts)
-    html = reports.build_html(survey, farmer, farm, hs_dicts, map_img, now().strftime("%d %b %Y, %H:%M UTC"))
+    map_img = reports.build_map(field, scan, hotspots)
+    html = reports.build_html(scan, field, farmer, farm, hotspots, map_img, now().strftime("%d %b %Y, %H:%M UTC"))
     reports.render_pdf(html, out)
-
-    rep = Report(id=report_id, survey_id=survey.id, farmer_id=farmer.id, version=version, path=str(out))
+    rep = Report(id=report_id, scan_id=scan.id, farmer_id=farmer.id, version=1, path=str(out))
     session.add(rep)
     session.commit()
     return rep
 
 
-def notify_survey(session: Session, survey: Survey) -> dict:
+def notify_survey(session: Session, scan: Scan) -> dict:
     """SMS the farmer that the survey is done (Kannada or English, crop-aware). Mock gateway in the prototype."""
     from . import security as sec
     from .sms import notify_text, provider
 
-    farm = session.get(Farm, survey.farm_id)
+    field = session.get(FieldRecord, scan.field_id)
+    farm = session.get(Farm, field.id)
     farmer = session.get(Farmer, farm.farmer_id)
     if not farmer.sms_consent:
         return {"sent": False, "reason": "no SMS consent"}
-    n = (survey.summary.get("summary") or {}).get("hotspots_detected", 0)
-    provider.send(session, farmer.mobile, notify_text(farmer.language, n > 0, farmer.collection_point, farmer.id, farm.crop), "NOTIFY")
+    hotspots = session.exec(select(Hotspot).where(Hotspot.scan_id == scan.id)).all()
+    provider.send(
+        session, farmer.mobile,
+        notify_text(farmer.language, len(hotspots) > 0, farmer.collection_point, farmer.id, farm.crop),
+        "NOTIFY",
+    )
     return {"sent": True, "to": sec.mask_mobile(farmer.mobile)}
-
-
-def _set_stage(survey_id: str, stage: str) -> None:
-    with Session(engine) as s:
-        sv = s.get(Survey, survey_id)
-        if sv:
-            sv.stage = stage
-            s.add(sv)
-            s.commit()
-
-
-def analyze_background(survey_id: str, survey_dir: str, model_path: Path | None = None, notify: bool = False) -> None:
-    """Background job: run the pipeline, ingest it (hotspots + PDF report), optionally SMS the farmer. Never raises."""
-    from agriscout_ml import pipeline
-
-    try:
-        run_dir = RUNS / survey_id
-        model = model_path if model_path is not None else (MODEL_PATH if MODEL_PATH.exists() else None)
-        pipeline.run(Path(survey_dir), model, run_dir, survey_id, progress=lambda st: _set_stage(survey_id, st))
-        _set_stage(survey_id, "report")
-        with Session(engine) as session:
-            ingest_run(session, session.get(Survey, survey_id), run_dir)
-            if notify:
-                notify_survey(session, session.get(Survey, survey_id))
-        _set_stage(survey_id, "done")
-    except Exception as e:  # noqa: BLE001
-        with Session(engine) as session:
-            survey = session.get(Survey, survey_id)
-            survey.status = "FAILED"
-            survey.error = f"{type(e).__name__}: {e}\n{traceback.format_exc(limit=3)}"
-            session.add(survey)
-            session.commit()

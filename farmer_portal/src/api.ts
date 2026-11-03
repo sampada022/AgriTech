@@ -127,10 +127,10 @@ export const api = {
       method: 'POST',
       headers: { 'X-Admin-Key': key },
     }),
-  adminAnalyze: (key: string, farm_id: string, survey_dir: string) =>
-    req<{ survey_id: string; status: string }>('/admin/analyses', { headers: { 'X-Admin-Key': key }, body: { farm_id, survey_dir } }),
+  adminAnalyze: (key: string, farm_id: string, sample: string, gsd_cm = 3.0) =>
+    req<{ survey_id: string; status: string }>('/admin/analyses', { headers: { 'X-Admin-Key': key }, body: { farm_id, sample, gsd_cm } }),
   adminSurveyStatus: (key: string, id: string) =>
-    req<{ id: string; status: string; error: string | null }>(`/admin/surveys/${id}`, { headers: { 'X-Admin-Key': key } }),
+    req<{ id: string; status: string; error: { code: string; message: string; hint: string | null } | null }>(`/admin/surveys/${id}`, { headers: { 'X-Admin-Key': key } }),
   devSms: (mobile: string) => req<SmsMessage[]>(`/dev/sms?mobile=${encodeURIComponent(mobile)}`),
 }
 

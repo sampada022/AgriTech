@@ -9,7 +9,7 @@ import { savePdf, viewPdf } from '../pdf'
 import type { FarmerMe, Hotspot, SurveyDetail, Verdict } from '../types'
 import { FARMER_TOKEN } from './FarmerLogin'
 
-const LAYER_KEYS = ['rgb', 'ndvi', 'ndre', 'spectral_anomaly', 'spectral_z', 'rgb_anomaly', 'fused_anomaly']
+const LAYER_KEYS = ['rgb', 'vari', 'heat']
 
 export default function FarmerDashboard() {
   const nav = useNavigate()
@@ -20,7 +20,7 @@ export default function FarmerDashboard() {
   const [surveyId, setSurveyId] = useState<string | null>(null)
   const [survey, setSurvey] = useState<SurveyDetail | null>(null)
   const [images, setImages] = useState<Record<string, string>>({})
-  const [active, setActive] = useState('fused_anomaly')
+  const [active, setActive] = useState('heat')
   const [selected, setSelected] = useState<string | null>(null)
   const [outlines, setOutlines] = useState(true)
   const [context, setContext] = useState(false)
@@ -118,17 +118,14 @@ export default function FarmerDashboard() {
         }
       />
       <main className="mx-auto max-w-6xl space-y-4 px-4 py-5">
-        {survey?.data_source === 'synthetic_demo' && (
+        {survey?.data_source === 'synthetic' && (
           <Banner tone="error">
             <b>Demo data.</b> This field is synthetic (generated for testing), not a real survey.
           </Banner>
         )}
-        {survey?.dataset && survey.data_source !== 'synthetic_demo' && (
-          <Banner tone={survey.dataset.simulated_stress ? 'warn' : 'info'}>
-            <b>{survey.dataset.simulated_stress ? 'Real imagery with simulated stress.' : 'Real UAV imagery from a public research dataset'}</b> (
-            {survey.dataset.crop}, {survey.dataset.license}). {survey.dataset.attribution}.{' '}
-            {survey.dataset.simulated_stress ??
-              'Shown to demonstrate the pipeline; this field has no ground-verified pest or disease records.'}
+        {survey?.data_source === 'stand_in' && (
+          <Banner tone="info">
+            <b>Stand-in imagery.</b> Shown to demonstrate the pipeline; this field has no ground-verified pest or disease records.
           </Banner>
         )}
         {err && <Banner tone="error">{err}</Banner>}
@@ -228,15 +225,13 @@ export default function FarmerDashboard() {
                       <input type="checkbox" checked={context} onChange={(e) => setContext(e.target.checked)} /> Street map underneath
                     </label>
                   </div>
-                  {active === 'spectral_z' && (
+                  {active === 'heat' && (
                     <p className="mt-3 rounded-lg bg-gray-50 p-2 text-xs text-gray-600">
-                      Shows how far each area is from this field's typical vegetation reading. Values below the alert level are shown for context
-                      only and are <b>not</b> alerts. Row structure, shadows and soil show up here too.
+                      Shows how far each tile's greenness and texture deviate from this field's own typical reading. Brighter means a stronger deviation.
                     </p>
                   )}
                   <p className="mt-3 text-xs text-gray-500">
-                    The vegetation-index baseline is the main signal; the visual texture check is experimental. Where both light up, evidence is stronger. Where only one does, the
-                    cause may be different.
+                    Classical computer vision (greenness + texture), not a trained pest classifier. A hotspot is a place to check, not a diagnosis.
                   </p>
                 </Card>
               </div>
@@ -252,18 +247,6 @@ export default function FarmerDashboard() {
                 )}
               </div>
             </div>
-
-            {survey.synthetic_check && (
-              <Card className="text-sm">
-                <div className="font-semibold">Pipeline self-check (planted patches only)</div>
-                <p className="mt-1 text-gray-600">{survey.synthetic_check.note}</p>
-                <div className="mt-2 text-gray-700">
-                  Planted patches found: <b>{survey.synthetic_check.patches.filter((p) => p.detected).length}</b> of{' '}
-                  {survey.synthetic_check.patches.length} · pixel recall {survey.synthetic_check.pixel_recall} · precision{' '}
-                  {survey.synthetic_check.pixel_precision}
-                </div>
-              </Card>
-            )}
           </>
         )}
       </main>

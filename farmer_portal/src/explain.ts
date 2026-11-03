@@ -16,9 +16,9 @@ export function explain(lang: Lang, name: string, s: SurveyDetail): string {
   const top = s.hotspots[0]
   return lang === 'kn'
     ? `${name} ಅವರೇ, ನಿಮ್ಮ ಬೆಳೆಯ ${sm.suspicious_area_percent}% ಭಾಗದಲ್ಲಿ ${sm.hotspots_detected} ಪ್ರದೇಶಗಳು ಅಸಾಮಾನ್ಯವಾಗಿ ಕಾಣುತ್ತಿವೆ. ` +
-        `ಮೊದಲು ನಕ್ಷೆಯ ಸಂಖ್ಯೆ 1 ಪ್ರದೇಶವನ್ನು ನೋಡಿ (ಸುಮಾರು ${Math.round(top.estimated_area_sqm)} ಚದರ ಮೀಟರ್). ` +
+        `ಮೊದಲು ನಕ್ಷೆಯ ಸಂಖ್ಯೆ 1 ಪ್ರದೇಶವನ್ನು ನೋಡಿ (ಸುಮಾರು ${Math.round(top.area_m2)} ಚದರ ಮೀಟರ್). ` +
         `ಇದು ಕೀಟವೇ ಎಂದು ಈಗಲೇ ಹೇಳಲಾಗದು; ಹೊಲದಲ್ಲಿ ಹೋಗಿ ಪರಿಶೀಲಿಸಬೇಕು.`
     : `${name}, ${sm.hotspots_detected} area(s) covering ${sm.suspicious_area_percent}% of your crop look unusual. ` +
-        `Please check area number 1 first (about ${Math.round(top.estimated_area_sqm)} square metres). ` +
+        `Please check area number 1 first (about ${Math.round(top.area_m2)} square metres). ` +
         `We cannot say yet that it is a pest; someone must walk to the spot and look.`
 }

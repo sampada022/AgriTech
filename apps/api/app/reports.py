@@ -1,4 +1,4 @@
-"""Farm health report: one PDF per analysis, generated once and stored.
+"""Farm health report: one PDF per scan, generated once and stored.
 
 HTML is rendered to PDF by headless Chromium so Kannada text is shaped correctly
 (reportlab does not do complex-script shaping).
@@ -12,8 +12,20 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-PRIORITY_COLOR = {"CRITICAL": "#b91c1c", "HIGH": "#ea580c", "MODERATE": "#ca8a04", "LOW": "#4b5563"}
-VERDICT_LABEL = {None: "Pending", "PEST": "Pest damage seen", "NOT_PEST": "No pest damage", "OTHER": "Other / inconclusive"}
+from .models import FieldRecord, Hotspot, Scan
+from .storage import public_dir
+
+TIER_LABEL = {"red": "HIGH priority", "amber": "MEDIUM priority", "grey_blue": "LOW / abiotic"}
+TIER_COLOR = {"red": "#b91c1c", "amber": "#ca8a04", "grey_blue": "#4b5563"}
+LABEL_TEXT = {
+    None: "Pending",
+    "pest": "Pest damage seen",
+    "disease": "Disease seen",
+    "nutrient": "Nutrient deficiency",
+    "water": "Water stress",
+    "weeds_other": "Weeds / other",
+    "false_alarm": "False alarm (healthy)",
+}
 
 
 def _b64(img: Image.Image) -> str:
@@ -22,71 +34,68 @@ def _b64(img: Image.Image) -> str:
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
-def build_map(run_dir: Path, summary: dict, hotspots: list[dict]) -> Image.Image:
-    """RGB with fused heat overlay and numbered hotspot markers."""
-    rgb = Image.open(run_dir / "rgb.png").convert("RGBA")
-    heat = Image.open(run_dir / "fused_anomaly.png").convert("RGBA")
+def build_map(field: FieldRecord, scan: Scan, hotspots: list[Hotspot]) -> Image.Image:
+    """RGB with the fused anomaly heat layer and numbered hotspot markers."""
+    base = public_dir() / scan.id / "layers"
+    rgb = Image.open(base / "rgb.webp").convert("RGBA")
+    heat = Image.open(base / "heat.webp").convert("RGBA").resize(rgb.size)
     img = Image.alpha_composite(rgb, heat)
     d = ImageDraw.Draw(img)
-    south, west, north, east = summary["image"]["bounds_wgs84"]
+    south, west, north, east = field.sw_lat, field.sw_lon, field.ne_lat, field.ne_lon
     W, H = img.size
     for i, h in enumerate(hotspots, 1):
-        lon, lat = h["props"]["centroid"]
-        x = (lon - west) / (east - west) * W
-        y = (north - lat) / (north - south) * H
+        x = (h.centroid_lon - west) / (east - west) * W
+        y = (north - h.centroid_lat) / (north - south) * H
         r = max(W // 55, 9)
         d.ellipse([x - r, y - r, x + r, y + r], fill=(255, 255, 255, 235), outline=(0, 0, 0, 255), width=2)
         d.text((x - r / 2.4, y - r / 1.6), str(i), fill=(0, 0, 0, 255))
     return img.convert("RGB")
 
 
-def build_html(survey, farmer, farm, hotspots: list[dict], map_img: Image.Image, generated: str) -> str:
-    s = survey.summary["summary"]
+def build_html(
+    scan: Scan, field: FieldRecord, farmer, farm, hotspots: list[Hotspot], map_img: Image.Image, generated: str
+) -> str:
     esc = html.escape
-    clear = s["hotspots_detected"] == 0
-    synthetic = survey.data_source == "synthetic_demo"
+    kpis = scan.kpis or {}
+    clear = len(hotspots) == 0
+    synthetic = field.data_source == "synthetic"
 
     rows = ""
     for i, h in enumerate(hotspots, 1):
-        p = h["props"]
+        hint = h.abiotic_hint or "Inspect on the ground to confirm the cause."
         rows += f"""
         <tr>
-          <td><b>{i}</b> <span class="muted">{esc(p['hotspot_id'])}</span></td>
-          <td><span class="chip" style="background:{PRIORITY_COLOR[p['priority']]}">{p['priority']}</span></td>
-          <td>{p['estimated_area_sqm']:.0f} m² <span class="muted">({p['crop_area_percent']}%)</span></td>
-          <td>{p['confidence']}</td>
-          <td>{esc(p['pattern_hint'])}</td>
-          <td>{esc(VERDICT_LABEL.get(h['verdict']))}</td>
+          <td><b>{i}</b> <span class="muted">{esc(h.id)}</span></td>
+          <td><span class="chip" style="background:{TIER_COLOR.get(h.tier, '#4b5563')}">{TIER_LABEL.get(h.tier, h.tier)}</span></td>
+          <td>{h.area_m2:.0f} m²</td>
+          <td>{h.confidence}</td>
+          <td>{esc(hint)}</td>
+          <td>{esc(LABEL_TEXT.get(h.label))}</td>
         </tr>"""
 
+    area_flagged_m2 = kpis.get("area_flagged_m2", 0.0)
+    area_flagged_pct = kpis.get("area_flagged_pct", 0.0)
+    field_area_m2 = kpis.get("field_area_m2", 0.0)
     if clear:
         finding_en = "No significant anomaly was detected in this survey."
         finding_kn = "ಈ ಸಮೀಕ್ಷೆಯಲ್ಲಿ ಯಾವುದೇ ಗಮನಾರ್ಹ ಅಸಾಮಾನ್ಯತೆ ಕಂಡುಬಂದಿಲ್ಲ."
     else:
         finding_en = (
-            f"{s['hotspots_detected']} area(s) covering {s['suspicious_area_percent']}% of your crop "
-            f"({s['suspicious_area_sqm']:.0f} m²) look unusual and should be inspected on the ground."
+            f"{len(hotspots)} area(s) covering {area_flagged_pct:.1f}% of your crop "
+            f"({area_flagged_m2:.0f} m²) look unusual and should be inspected on the ground."
         )
         finding_kn = (
-            f"ನಿಮ್ಮ ಬೆಳೆಯ {s['suspicious_area_percent']}% ಭಾಗದಲ್ಲಿ ({s['hotspots_detected']} ಪ್ರದೇಶಗಳು) "
+            f"ನಿಮ್ಮ ಬೆಳೆಯ {area_flagged_pct:.1f}% ಭಾಗದಲ್ಲಿ ({len(hotspots)} ಪ್ರದೇಶಗಳು) "
             "ಅಸಾಮಾನ್ಯತೆ ಕಂಡುಬಂದಿದೆ. ಹೊಲದಲ್ಲಿ ಪರಿಶೀಲಿಸಿ."
         )
 
-    ds = survey.summary.get("dataset") or {}
     if synthetic:
         banner = '<div class="demo">DEMO DATA: this report was generated from a synthetic field, not a real survey.</div>'
-    elif ds.get("simulated_stress"):
-        banner = (
-            '<div class="demo" style="background:#fffbeb;border-color:#f59e0b;color:#92400e">'
-            f"REAL IMAGERY WITH SIMULATED STRESS ({esc(str(ds.get('crop', 'crop')))}, {esc(str(ds.get('license', '')))}). "
-            f"{esc(str(ds.get('simulated_stress', '')))} {esc(str(ds.get('attribution', '')))}."
-            "</div>"
-        )
-    elif ds:
+    elif field.data_source == "stand_in":
         banner = (
             '<div class="demo" style="background:#eff6ff;border-color:#3b82f6;color:#1e3a8a">'
-            f"REAL UAV IMAGERY FROM A PUBLIC RESEARCH DATASET ({esc(str(ds.get('crop', 'crop')))}, {esc(str(ds.get('license', '')))}). "
-            f"{esc(str(ds.get('attribution', '')))}. Shown to demonstrate the pipeline; this field has no ground-verified pest or disease records."
+            "STAND-IN IMAGERY: shown to demonstrate the pipeline; this field has no ground-verified "
+            "pest or disease records."
             "</div>"
         )
     else:
@@ -109,14 +118,14 @@ def build_html(survey, farmer, farm, hotspots: list[dict], map_img: Image.Image,
     {banner}
     <div class="head"><div><h1>Crop Health Report <span class="muted kn">· ಬೆಳೆ ಆರೋಗ್ಯ ವರದಿ</span></h1>
       <div class="muted">{esc(farm.name)} · {esc(farmer.name)} · Farmer ID {esc(farmer.id)} · {esc(farmer.village)}</div></div>
-      <div class="muted" style="text-align:right">Survey {esc(survey.id)}<br>{esc(generated)}</div></div>
+      <div class="muted" style="text-align:right">Survey {esc(scan.id)}<br>{esc(generated)}</div></div>
 
     <h2>Summary <span class="muted kn">· ಸಾರಾಂಶ</span></h2>
     <div class="grid">
-      <div class="card"><span class="muted">Valid crop area</span><b>{s['valid_crop_area_sqm']:.0f} m²</b></div>
-      <div class="card"><span class="muted">Areas to inspect</span><b>{s['hotspots_detected']}</b></div>
-      <div class="card"><span class="muted">Suspicious area</span><b>{s['suspicious_area_sqm']:.0f} m²</b></div>
-      <div class="card"><span class="muted">Share of crop</span><b>{s['suspicious_area_percent']}%</b></div>
+      <div class="card"><span class="muted">Field area</span><b>{field_area_m2:.0f} m²</b></div>
+      <div class="card"><span class="muted">Areas to inspect</span><b>{len(hotspots)}</b></div>
+      <div class="card"><span class="muted">Suspicious area</span><b>{area_flagged_m2:.0f} m²</b></div>
+      <div class="card"><span class="muted">Share of crop</span><b>{area_flagged_pct:.1f}%</b></div>
     </div>
     <p>{esc(finding_en)}</p>
     <p class="kn">{esc(finding_kn)}</p>
@@ -128,10 +137,10 @@ def build_html(survey, farmer, farm, hotspots: list[dict], map_img: Image.Image,
     <h2>Areas to inspect <span class="muted kn">· ಪರಿಶೀಲಿಸಬೇಕಾದ ಪ್ರದೇಶಗಳು</span></h2>
     {"<p>None.</p>" if clear else f'<table><tr><th>#</th><th>Priority</th><th>Area</th><th>Confidence</th><th>What the pattern suggests</th><th>Ground check</th></tr>{rows}</table>'}
 
-    <div class="warn"><b>Important.</b> {esc(survey.summary.get('warning',''))}<br>
+    <div class="warn"><b>Important.</b> Hotspots indicate potential crop anomalies and require field verification. They are not a diagnosis.<br>
       <span class="kn">ಇವು ಸಂಭವನೀಯ ಸಮಸ್ಯೆ ಪ್ರದೇಶಗಳು ಮಾತ್ರ. ಕೀಟ ಅಥವಾ ರೋಗವನ್ನು ಖಚಿತಪಡಿಸಲು ಹೊಲದಲ್ಲಿ ಪರಿಶೀಲನೆ ಅಗತ್ಯ.</span></div>
     <div class="foot">Priority shows how urgently to inspect, not how severe a disease is. Confidence reflects image quality, agreement between the
-      image and spectral analyses, and area size; it is not a probability of damage. Model {esc(survey.summary.get('model_version',''))}.
+      texture and vegetation-index signals, and area size; it is not a probability of damage.
       Kannada text is illustrative and pending review by a Kannada-speaking agricultural expert.</div>
     </body></html>"""
 

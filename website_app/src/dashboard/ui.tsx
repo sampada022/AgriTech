@@ -1,6 +1,6 @@
-import { AlertTriangle, Check, Circle, Footprints, X, type LucideIcon } from 'lucide-react'
+import { AlertTriangle, Check, Circle, Eye, Footprints, X, type LucideIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
-import type { HState } from '../api'
+import type { HotspotStatus, Tier } from '../api'
 
 export const fmtDate = (iso: string) => new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 export const ago = (iso: string) => {
@@ -34,19 +34,24 @@ export function Stat({ label, value, hint, accent, unit }: { label: string; valu
 }
 export const StatGrid = ({ children, cols = 'sm:grid-cols-3 xl:grid-cols-4' }: { children: ReactNode; cols?: string }) => <dl className={`grid grid-cols-2 gap-px overflow-hidden rounded-card border border-line bg-line ${cols}`}>{children}</dl>
 
-const SEV: Record<string, { cls: string; Icon?: LucideIcon }> = { High: { cls: 'border-hot text-hot', Icon: AlertTriangle }, Medium: { cls: 'border-ink text-ink' }, Low: { cls: 'border-line text-muted' } }
-export function SeverityChip({ s }: { s: string }) {
-  const { cls, Icon } = SEV[s] ?? SEV.Low
-  return <span className={`label mono inline-flex items-center gap-1 rounded-ctl border px-2 py-1 ${cls}`}>{Icon && <Icon aria-hidden size={12} strokeWidth={1.5} />}{s}</span>
+const TIER: Record<Tier, { label: string; cls: string; Icon?: LucideIcon }> = {
+  red: { label: 'Red', cls: 'border-hot text-hot', Icon: AlertTriangle },
+  amber: { label: 'Amber', cls: 'border-ink text-ink' },
+  grey_blue: { label: 'Grey', cls: 'border-line text-muted' },
 }
-export const STATE_META: Record<HState, { label: string; cls: string; Icon: LucideIcon }> = {
-  new: { label: 'New', cls: 'border-line text-muted', Icon: Circle },
-  visited: { label: 'Visited', cls: 'border-ink text-ink', Icon: Footprints },
-  treated: { label: 'Treated', cls: 'border-canopy text-canopy', Icon: Check },
-  dismissed: { label: 'Dismissed', cls: 'border-line text-muted', Icon: X },
+export function TierChip({ s }: { s: Tier }) {
+  const { label, cls, Icon } = TIER[s]
+  return <span className={`label mono inline-flex items-center gap-1 rounded-ctl border px-2 py-1 ${cls}`}>{Icon && <Icon aria-hidden size={12} strokeWidth={1.5} />}{label}</span>
 }
-export function StateChip({ s }: { s: HState }) {
-  const { label, cls, Icon } = STATE_META[s]
+export const STATUS_META: Record<HotspotStatus, { label: string; cls: string; Icon: LucideIcon }> = {
+  detected: { label: 'Detected', cls: 'border-line text-muted', Icon: Circle },
+  assigned: { label: 'Assigned', cls: 'border-ink text-ink', Icon: Footprints },
+  inspected: { label: 'Inspected', cls: 'border-ink text-ink', Icon: Eye },
+  confirmed: { label: 'Confirmed', cls: 'border-canopy text-canopy', Icon: Check },
+  cleared: { label: 'Cleared', cls: 'border-line text-muted', Icon: X },
+}
+export function StatusChip({ s }: { s: HotspotStatus }) {
+  const { label, cls, Icon } = STATUS_META[s]
   return <span className={`label mono inline-flex items-center gap-1 rounded-ctl border px-2 py-1 ${cls}`}><Icon aria-hidden size={12} strokeWidth={1.5} />{label}</span>
 }
 
@@ -56,4 +61,3 @@ export function Empty({ title, body, children }: { title: string; body?: string;
 export const PageTitle = ({ children, sub, action }: { children: ReactNode; sub?: string; action?: ReactNode }) => (
   <div className="mb-8 flex flex-wrap items-end justify-between gap-4"><div><h1 className="!text-[clamp(1.75rem,3vw,2.5rem)]">{children}</h1>{sub && <p className="mt-2 text-muted">{sub}</p>}</div>{action}</div>
 )
-export const sevColor = { High: 'var(--hot)', Medium: 'var(--text)', Low: 'var(--muted)' } as const

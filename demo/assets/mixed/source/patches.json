@@ -1,0 +1,131 @@
+{
+  "synthetic": true,
+  "scenario": "mixed",
+  "difficulty": "medium",
+  "seed": 18,
+  "gsd_m": 0.03,
+  "class_ids": {
+    "0": "healthy",
+    "1": "pest",
+    "2": "drought",
+    "3": "nutrient",
+    "4": "distractor"
+  },
+  "patches": [
+    {
+      "id": "track",
+      "class": "distractor",
+      "kind": "soil_track",
+      "width_m": 2.4433392535056186
+    },
+    {
+      "id": "shadow",
+      "class": "distractor",
+      "kind": "tree_shadow",
+      "radius_m": 4.702861537599795,
+      "center_px": [
+        2728,
+        1242
+      ]
+    },
+    {
+      "id": "trough",
+      "class": "distractor",
+      "kind": "water_trough",
+      "center_px": [
+        1553,
+        1058
+      ]
+    },
+    {
+      "id": "drought_0",
+      "class": "drought",
+      "center_px": [
+        3299,
+        1841
+      ],
+      "area_m2": 322.7
+    },
+    {
+      "id": "nutrient_0",
+      "class": "nutrient",
+      "width_m": 3.62,
+      "across_offset_px": 3433,
+      "area_m2": 233.2
+    },
+    {
+      "id": "nutrient_1",
+      "class": "nutrient",
+      "width_m": 2.48,
+      "across_offset_px": 1940,
+      "area_m2": 312.2
+    },
+    {
+      "id": "nutrient_2",
+      "class": "nutrient",
+      "width_m": 3.26,
+      "across_offset_px": 1229,
+      "area_m2": 366.6
+    },
+    {
+      "id": "pest_0",
+      "class": "pest",
+      "center_px": [
+        2388,
+        1041
+      ],
+      "radius_m": 2.77,
+      "area_m2": 24.9,
+      "density": 0.38,
+      "faint": true
+    },
+    {
+      "id": "pest_1",
+      "class": "pest",
+      "center_px": [
+        981,
+        1578
+      ],
+      "radius_m": 1.25,
+      "area_m2": 6.62,
+      "density": 0.59,
+      "faint": false
+    },
+    {
+      "id": "pest_2",
+      "class": "pest",
+      "center_px": [
+        3628,
+        2945
+      ],
+      "radius_m": 1.65,
+      "area_m2": 9.11,
+      "density": 0.52,
+      "faint": false
+    },
+    {
+      "id": "pest_3",
+      "class": "pest",
+      "center_px": [
+        1972,
+        1979
+      ],
+      "radius_m": 2.59,
+      "area_m2": 18.68,
+      "density": 0.4,
+      "faint": true
+    },
+    {
+      "id": "pest_4",
+      "class": "pest",
+      "center_px": [
+        2556,
+        2251
+      ],
+      "radius_m": 1.92,
+      "area_m2": 9.35,
+      "density": 0.32,
+      "faint": true
+    }
+  ]
+}

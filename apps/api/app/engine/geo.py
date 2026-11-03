@@ -1,55 +1,84 @@
+"""Local flat-earth geometry (TRD 5): areas, distances and DBSCAN all run in metres."""
+
+from __future__ import annotations
+
 import math
-from typing import Tuple, List
+from dataclasses import dataclass
 
-# Approximate conversion factors near Mandya, Karnataka (~12.52 N, 76.90 E)
-# In local metres:
-# x = (lon - lon0) * 111320 * cos(lat0)
-# y = (lat - lat0) * 110574
+M_PER_DEG_LON_AT_EQUATOR = 111_320.0
+M_PER_DEG_LAT = 110_574.0
 
-METRES_PER_DEG_LAT = 110574.0
-METRES_PER_DEG_LON_EQUATOR = 111320.0
 
-def latlon_to_xy(lat: float, lon: float, lat0: float, lon0: float) -> Tuple[float, float]:
-    """
-    Converts (lat, lon) in WGS84 to local metres (x, y) relative to origin (lat0, lon0).
-    x: Easting in metres
-    y: Northing in metres
-    """
-    lat_rad = math.radians(lat0)
-    x = (lon - lon0) * METRES_PER_DEG_LON_EQUATOR * math.cos(lat_rad)
-    y = (lat - lat0) * METRES_PER_DEG_LAT
-    return (x, y)
+@dataclass(frozen=True)
+class Bounds:
+    """South-west and north-east corners, in degrees."""
 
-def xy_to_latlon(x: float, y: float, lat0: float, lon0: float) -> Tuple[float, float]:
-    """
-    Converts local metres (x, y) back to WGS84 (lat, lon) relative to origin (lat0, lon0).
-    """
-    lat_rad = math.radians(lat0)
-    lat = lat0 + (y / METRES_PER_DEG_LAT)
-    lon = lon0 + (x / (METRES_PER_DEG_LON_EQUATOR * math.cos(lat_rad)))
-    return (lat, lon)
+    sw_lat: float
+    sw_lon: float
+    ne_lat: float
+    ne_lon: float
 
-def compute_field_dimensions_m(sw_lat: float, sw_lon: float, ne_lat: float, ne_lon: float) -> Tuple[float, float]:
-    """
-    Computes (width_m, height_m) for a field bounded by SW and NE corners.
-    """
-    origin_lat = (sw_lat + ne_lat) / 2.0
-    origin_lon = (sw_lon + ne_lon) / 2.0
-    sw_x, sw_y = latlon_to_xy(sw_lat, sw_lon, origin_lat, origin_lon)
-    ne_x, ne_y = latlon_to_xy(ne_lat, ne_lon, origin_lat, origin_lon)
-    return (abs(ne_x - sw_x), abs(ne_y - sw_y))
+    def as_dict(self) -> dict[str, float]:
+        return {
+            "sw_lat": self.sw_lat,
+            "sw_lon": self.sw_lon,
+            "ne_lat": self.ne_lat,
+            "ne_lon": self.ne_lon,
+        }
 
-def haversine_distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """
-    Computes great-circle distance between two GPS coordinates in metres.
-    """
-    R = 6371000.0
-    phi1 = math.radians(lat1)
-    phi2 = math.radians(lat2)
-    delta_phi = math.radians(lat2 - lat1)
-    delta_lambda = math.radians(lon2 - lon1)
+    def as_leaflet(self) -> list[list[float]]:
+        """[[south, west], [north, east]], the shape Leaflet's ImageOverlay takes."""
+        return [[self.sw_lat, self.sw_lon], [self.ne_lat, self.ne_lon]]
 
-    a = math.sin(delta_phi / 2.0) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2.0) ** 2
-    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
-    return R * c
 
+class FieldFrame:
+    """Maps lat/lon and image pixels to metres around the field centre.
+
+    Pixel x grows east and pixel y grows south. Metre x grows east and metre y grows north.
+    """
+
+    def __init__(self, bounds: Bounds, image_width: int, image_height: int):
+        self.bounds = bounds
+        self.image_width = image_width
+        self.image_height = image_height
+        self.lat0 = (bounds.sw_lat + bounds.ne_lat) / 2
+        self.lon0 = (bounds.sw_lon + bounds.ne_lon) / 2
+        self._m_per_lon = M_PER_DEG_LON_AT_EQUATOR * math.cos(math.radians(self.lat0))
+        self.width_m = (bounds.ne_lon - bounds.sw_lon) * self._m_per_lon
+        self.height_m = (bounds.ne_lat - bounds.sw_lat) * M_PER_DEG_LAT
+        self.gsd_x = self.width_m / image_width
+        self.gsd_y = self.height_m / image_height
+
+    @property
+    def area_m2(self) -> float:
+        return self.width_m * self.height_m
+
+    @property
+    def gsd_m(self) -> float:
+        return (self.gsd_x + self.gsd_y) / 2
+
+    def latlon_to_xy(self, lat: float, lon: float) -> tuple[float, float]:
+        return (lon - self.lon0) * self._m_per_lon, (lat - self.lat0) * M_PER_DEG_LAT
+
+    def xy_to_latlon(self, x: float, y: float) -> tuple[float, float]:
+        return self.lat0 + y / M_PER_DEG_LAT, self.lon0 + x / self._m_per_lon
+
+    def px_to_xy(self, px: float, py: float) -> tuple[float, float]:
+        return px * self.gsd_x - self.width_m / 2, self.height_m / 2 - py * self.gsd_y
+
+    def xy_to_px(self, x: float, y: float) -> tuple[float, float]:
+        return (x + self.width_m / 2) / self.gsd_x, (self.height_m / 2 - y) / self.gsd_y
+
+
+def bounds_from_centre(lat: float, lon: float, width_m: float, height_m: float) -> Bounds:
+    """Bounds for a rectangle of the given size in metres, used by the simulator."""
+    half_lat = height_m / 2 / M_PER_DEG_LAT
+    half_lon = width_m / 2 / (M_PER_DEG_LON_AT_EQUATOR * math.cos(math.radians(lat)))
+    return Bounds(lat - half_lat, lon - half_lon, lat + half_lat, lon + half_lon)
+
+
+def gsd_for_flight(
+    sensor_width_mm: float, altitude_m: float, focal_length_mm: float, image_width_px: int
+) -> float:
+    """GSD in metres per pixel (TRD 6.1)."""
+    return (sensor_width_mm / 1000) * altitude_m / ((focal_length_mm / 1000) * image_width_px)

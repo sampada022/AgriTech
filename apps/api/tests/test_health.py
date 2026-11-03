@@ -5,5 +5,4 @@ def test_backend_sanity():
 def test_config_defaults():
     from app.config import settings
     assert settings.PORT == 8000
-    assert settings.DEMO_MODE is True
-
+    assert settings.demo_mode is True

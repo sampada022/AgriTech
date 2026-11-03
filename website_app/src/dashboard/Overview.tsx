@@ -1,82 +1,83 @@
-import { Camera, Footprints, ScanLine } from 'lucide-react'
 import { useState } from 'react'
-import { api } from '../api'
+import { demoApi } from '../api'
 import { Button, ButtonLink } from '../components/Button'
-import { BarList, ChartCard, DayBars, LegendItem, StackedBars } from './charts'
 import { useStore } from './store'
-import { ago, Empty, PageTitle, Panel, SeverityChip, Stat, StatGrid, StateChip } from './ui'
-
-const ICON = { scan: ScanLine, photo: Camera, state: Footprints } as const
+import { Empty, PageTitle, Panel, Stat, StatGrid, TierChip } from './ui'
 
 export default function Overview() {
-  const { stats, scans, refresh, loading, online } = useStore()
+  const { fields, totals, model, refresh, loading, online } = useStore()
   const [busy, setBusy] = useState(false)
-  const demo = async () => { setBusy(true); try { const s = await api.create({ sample: 'demo-field-synthetic.jpg', name: 'Demo field', gsd: 1 }); await refresh(); location.hash = `#/dashboard/scans/${s.id}` } catch { setBusy(false) } }
+  const demo = async () => { setBusy(true); try { const d = await demoApi.load('mixed'); await refresh(); location.hash = `#/dashboard/scans/${d.scan_id}` } catch { setBusy(false) } }
 
   if (loading) return <p className="text-muted">Loading…</p>
-  if (!stats || online === false) return <Empty title="The analysis server is not running" body="Start it, then this page fills in on its own.">
-    <p className="mono text-sm">uv run uvicorn backend.app.main:app --port 8000</p></Empty>
-  const t = stats.totals
-  if (t.scans === 0) return (<><PageTitle sub="Everything about your fields in one place.">Overview</PageTitle>
-    <Empty title="No fields analysed yet" body="Upload a drone photo, or run the demo field to see how the dashboard fills in.">
-      <div className="flex flex-wrap justify-center gap-3"><Button onClick={demo} disabled={busy}>{busy ? 'Analysing…' : 'Analyse the demo field'}</Button><ButtonLink variant="secondary" href="#/dashboard/scans">Upload a photo</ButtonLink></div></Empty></>)
+  if (online === false) return <Empty title="The analysis server is not running" body="Start it, then this page fills in on its own.">
+    <p className="mono text-sm">cd apps/api && uvicorn app.main:app --port 8000</p></Empty>
+  if (totals.fields === 0) return (<><PageTitle sub="Everything about your fields in one place.">Overview</PageTitle>
+    <Empty title="No fields analysed yet" body="Upload a drone photo, or load the mixed-stress demo scenario to see how the dashboard fills in.">
+      <div className="flex flex-wrap justify-center gap-3"><Button onClick={demo} disabled={busy}>{busy ? 'Loading…' : 'Load the demo scenario'}</Button><ButtonLink variant="secondary" href="#/dashboard/scans">Upload a photo</ButtonLink></div></Empty></>)
 
-  const attention = [...scans].filter((s) => s.open > 0).sort((a, b) => b.open - a.open)[0]
-  const latest = attention ?? scans.find((s) => s.id === stats.latest_scan_id) ?? scans[0]
+  const sorted = [...fields].sort((a, b) => {
+    const open = (f: typeof a) => (f.scan?.kpis ? f.scan.kpis.tier_counts.red + f.scan.kpis.tier_counts.amber : -1)
+    return open(b) - open(a)
+  })
+  const attention = sorted.find((f) => f.scan?.kpis && f.scan.kpis.tier_counts.red + f.scan.kpis.tier_counts.amber > 0)
+  const latest = attention ?? sorted[0]
+  const latestImg = latest?.scan?.layers.heat?.url ?? latest?.scan?.layers.rgb?.url
+
   return (
     <>
       <PageTitle sub="What needs attention today, across every field." action={<ButtonLink href="#/dashboard/scans" arrow={false}>Analyse a field</ButtonLink>}>Overview</PageTitle>
       <StatGrid>
-        <Stat label="Hotspots to visit" value={t.open} accent hint="New or visited, not yet treated" />
-        <Stat label="Fields analysed" value={t.scans} />
-        <Stat label="Hotspots found" value={t.hotspots} hint={`${stats.severity.High} high severity`} />
-        <Stat label="Awaiting leaf photo" value={t.awaiting_photo} />
-        <Stat label="Confirmed by photo" value={t.confirmed} />
-        <Stat label="Area flagged" value={t.area_m2} unit="m²" hint="Assumes the cm-per-pixel you entered" />
-        <Stat label="Walk planned" value={t.route_m} unit="m" />
-        <Stat label="Treated" value={stats.states.treated} hint={`${stats.states.dismissed} dismissed as false alarms`} />
+        <Stat label="Hotspots to visit" value={totals.open} accent hint="Red or amber, not yet cleared" />
+        <Stat label="Fields analysed" value={totals.fields} />
+        <Stat label="Hotspots found" value={totals.hotspots} />
+        <Stat label="Still running" value={totals.running} hint={totals.failed ? `${totals.failed} failed` : undefined} />
+        <Stat label="Area flagged" value={Math.round(totals.area_flagged_m2)} unit="m²" />
+        <Stat label="Walk planned" value={Math.round(totals.route_m)} unit="m" />
+        <Stat label="Model version" value={model?.version ?? 1} hint={model?.is_prior ? 'Still the priors' : `${model?.label_count ?? 0} labels`} />
+        <Stat label="Training agreement" value={model?.agreement != null ? `${Math.round(model.agreement * 100)}%` : '—'} />
       </StatGrid>
 
       <div className="mt-8 grid items-start gap-6 lg:grid-cols-12">
-        <Panel className="lg:col-span-7" title="Priority queue" sub="Highest severity first. Open a hotspot to act on it."
+        <Panel className="lg:col-span-7" title="Priority queue" sub="Highest tier first. Open a field to act on its hotspots."
           action={<a href="#/dashboard/tasks" className="link-u text-sm font-medium">All field tasks</a>}>
-          {stats.queue.length === 0 ? <p className="text-muted">Nothing waiting. Every hotspot is treated or dismissed.</p> : (
+          {sorted.every((f) => !f.scan?.kpis || f.scan.kpis.hotspot_count === 0) ? <p className="text-muted">Nothing waiting. Every field looks healthy or is still being scanned.</p> : (
             <div className="overflow-x-auto"><table className="w-full min-w-[520px] text-left text-sm">
-              <thead><tr className="border-b border-ink">{['Field', 'Hotspot', 'Severity', 'Area', 'State', ''].map((h) => <th key={h} className="label mono py-2 pr-3 font-normal text-muted">{h}</th>)}</tr></thead>
-              <tbody>{stats.queue.slice(0, 7).map((q) => (
-                <tr key={q.scan_id + q.hotspot} className="border-b border-line">
-                  <td className="max-w-[160px] truncate py-3 pr-3">{q.scan_name}</td><td className="mono pr-3">{q.hotspot}{q.route_stop ? ` · stop ${q.route_stop}` : ''}</td>
-                  <td className="pr-3"><SeverityChip s={q.severity} /></td><td className="mono pr-3">{q.area_m2} m²</td><td className="pr-3"><StateChip s={q.state} /></td>
-                  <td><a href={`#/dashboard/scans/${q.scan_id}`} className="link-u text-sm font-medium">Open</a></td></tr>))}</tbody></table></div>
+              <thead><tr className="border-b border-ink">{['Field', 'Tiers', 'Area flagged', 'Status', ''].map((h) => <th key={h} className="label mono py-2 pr-3 font-normal text-muted">{h}</th>)}</tr></thead>
+              <tbody>{sorted.filter((f) => f.scan?.kpis && f.scan.kpis.hotspot_count > 0).slice(0, 7).map((f) => (
+                <tr key={f.id} className="border-b border-line">
+                  <td className="max-w-[160px] truncate py-3 pr-3">{f.name}</td>
+                  <td className="pr-3">{(['red', 'amber', 'grey_blue'] as const).filter((t) => (f.scan!.kpis!.tier_counts[t] ?? 0) > 0).map((t) => <span key={t} className="mr-1 inline-flex items-center gap-1"><TierChip s={t} /><span className="mono text-xs">×{f.scan!.kpis!.tier_counts[t]}</span></span>)}</td>
+                  <td className="mono pr-3">{Math.round(f.scan!.kpis!.area_flagged_m2)} m²</td>
+                  <td className="mono pr-3 capitalize">{f.scan?.status}</td>
+                  <td><a href={`#/dashboard/scans/${f.latest_scan!.id}`} className="link-u text-sm font-medium">Open</a></td></tr>))}</tbody></table></div>
           )}
         </Panel>
 
         {latest && (
-          <Panel className="lg:col-span-5" title={attention ? 'Needs attention' : 'Latest field'} sub={`${latest.name} · ${ago(latest.created_at)}`} action={<a href={`#/dashboard/scans/${latest.id}`} className="link-u text-sm font-medium">Open</a>}>
-            <a href={`#/dashboard/scans/${latest.id}`} className="block overflow-hidden rounded-card border border-line">
-              <img src={latest.files.overlay} alt={`Latest scan ${latest.name} with hotspots marked`} loading="lazy" className="block w-full" /></a>
-            <p className="mono mt-3 text-sm text-muted">{latest.hotspots} hotspot{latest.hotspots === 1 ? '' : 's'} · {latest.open} open · {latest.route_m ?? 0} m walk</p>
+          <Panel className="lg:col-span-5" title={attention ? 'Needs attention' : 'Latest field'} sub={latest.name} action={latest.latest_scan && <a href={`#/dashboard/scans/${latest.latest_scan.id}`} className="link-u text-sm font-medium">Open</a>}>
+            {latestImg ? (
+              <a href={latest.latest_scan ? `#/dashboard/scans/${latest.latest_scan.id}` : '#'} className="block overflow-hidden rounded-card border border-line">
+                <img src={latestImg} alt={`Latest scan of ${latest.name}`} loading="lazy" className="block w-full" /></a>
+            ) : <p className="text-muted">No layers yet.</p>}
+            <p className="mono mt-3 text-sm text-muted">{latest.scan?.kpis?.hotspot_count ?? 0} hotspot{latest.scan?.kpis?.hotspot_count === 1 ? '' : 's'} · {Math.round(latest.scan?.kpis?.route_distance_m ?? 0)} m walk</p>
           </Panel>
         )}
 
-        <div className="lg:col-span-7"><ChartCard title="Hotspots found, last 14 days" head={['Date', 'Hotspots', 'Scans']} rows={stats.by_day.map((d) => [d.date, d.hotspots, d.scans])}>
-          <DayBars data={stats.by_day} field="hotspots" label="Hotspots" /></ChartCard></div>
-
-        <div className="lg:col-span-5"><ChartCard title="Pests confirmed by leaf photo" sub="Species named by the scout" head={['Species', 'Photos']} rows={stats.species.map((s) => [s.name, s.count])}>
-          {stats.species.length ? <BarList data={stats.species} /> : <p className="text-muted">No leaf photos yet. Walk to a hotspot and add one.</p>}</ChartCard></div>
-
-        <Panel className="lg:col-span-5" title="Recent activity">
-          <ul className="flex flex-col divide-y divide-line">
-            {stats.activity.map((a, i) => { const Icon = ICON[a.kind]; return (
-              <li key={i} className="flex gap-3 py-3 text-sm"><Icon aria-hidden size={16} strokeWidth={1.5} className="mt-0.5 shrink-0 text-muted" />
-                <div className="min-w-0 flex-1"><a href={`#/dashboard/scans/${a.scan_id}`} className="link-u">{a.text}</a></div><span className="label mono shrink-0 text-muted">{ago(a.t)}</span></li>) })}
-          </ul>
+        <Panel className="lg:col-span-5" title="Hotspots by tier" sub="Across every field">
+          <ul className="flex flex-col divide-y divide-line">{(['red', 'amber', 'grey_blue'] as const).map((k) => <li key={k} className="flex items-center justify-between py-3"><TierChip s={k} /><span className="font-display text-3xl font-bold [font-variant-numeric:tabular-nums]">{totals.tiers[k]}</span></li>)}</ul>
+          <p className="mt-3 text-sm text-muted">Red needs both biotic evidence and a strong anomaly. Grey is informational — usually water or nutrient stress, not pest.</p>
         </Panel>
 
-        <div className="lg:col-span-7"><ChartCard title="Pest-like vs drought-like tiles" sub="Per field. Same colour on the map can have a different cause."
-          head={['Field', 'Pest-like', 'Drought-like']} rows={stats.per_scan.map((s) => [s.name, s.biotic_tiles, s.abiotic_tiles])}
-          legend={<><LegendItem swatch={<i className="block h-3 w-3 rounded-[3px] bg-hot" />}>Pest-like (ragged)</LegendItem><LegendItem swatch={<i className="block h-3 w-3 rounded-[3px]" style={{ background: 'var(--stress)' }} />}>Drought-like (even fade)</LegendItem></>}>
-          <StackedBars data={stats.per_scan.slice(0, 8).map((s) => ({ id: s.id, name: s.name, biotic: s.biotic_tiles, abiotic: s.abiotic_tiles }))} /></ChartCard></div>
+        <Panel className="lg:col-span-7" title="Model recalibration" sub={model?.recalibration_note}>
+          {model ? (
+            <>
+              <p className="font-display text-4xl font-bold [font-variant-numeric:tabular-nums]">v{model.version}</p>
+              <p className="mt-1 text-sm text-muted">{model.label_count} confirmed label{model.label_count === 1 ? '' : 's'} · {model.agreement != null ? `${Math.round(model.agreement * 100)}% training agreement` : 'no labels yet'}</p>
+              {model.false_positive.hint && <p className="mt-3 rounded-ctl border border-line bg-bg p-3 text-sm">{model.false_positive.hint}</p>}
+            </>
+          ) : <p className="text-muted">Loading…</p>}
+        </Panel>
       </div>
     </>
   )

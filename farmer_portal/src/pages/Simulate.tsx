@@ -10,34 +10,26 @@ const ACCESS_TEXT: Record<string, string> = {
   ASSISTED: 'Keypad phone: SMS, then collects the report through an operator',
   BOTH: 'Smartphone and operator access',
 }
+const STATUS_LABEL: Record<SimFarm['status'], string> = {
+  not_started: 'Not started', queued: 'Queued', running: 'Analysing…', done: 'Done', failed: 'Failed', cancelled: 'Cancelled',
+}
 
-function StageList({ stages, farm }: { stages: SimStatus['stages']; farm: SimFarm }) {
-  const cur = stages.findIndex((s) => s.key === farm.stage)
-  const done = farm.stage === 'done'
+function ProgressBar({ farm }: { farm: SimFarm }) {
+  const done = farm.status === 'done'
   return (
-    <ol className="space-y-1.5 text-sm">
-      {stages.map((s, i) => {
-        const state = farm.status === 'NOT_STARTED' ? 'pending' : done || i < cur ? 'done' : i === cur ? 'active' : 'pending'
-        return (
-          <li key={s.key} className="flex items-center gap-2">
-            <span
-              className={`grid h-5 w-5 place-items-center rounded-full text-[11px] ${
-                state === 'done' ? 'bg-brand-600 text-white' : state === 'active' ? 'animate-pulse bg-amber-400 text-white' : 'bg-gray-200 text-gray-400'
-              }`}
-            >
-              {state === 'done' ? '✓' : i + 1}
-            </span>
-            <span className={state === 'pending' ? 'text-gray-400' : state === 'active' ? 'font-medium text-gray-900' : 'text-gray-700'}>
-              {s.label}
-            </span>
-          </li>
-        )
-      })}
-    </ol>
+    <div>
+      <div className="mb-1 flex items-center justify-between text-sm">
+        <span className={farm.status === 'failed' ? 'text-red-700' : done ? 'font-medium text-gray-900' : 'text-gray-600'}>
+          {STATUS_LABEL[farm.status]}{farm.stage ? ` · ${farm.stage}` : ''}
+        </span>
+        <span className="text-gray-500">{farm.progress}%</span>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-gray-100"><div className="h-full bg-brand-600" style={{ width: `${farm.progress}%`, transition: 'width .6s' }} /></div>
+    </div>
   )
 }
 
-function FarmCard({ farm, stages, adminKey, thumb, onError }: { farm: SimFarm; stages: SimStatus['stages']; adminKey: string; thumb?: string; onError: (m: string) => void }) {
+function FarmCard({ farm, adminKey, thumb, onError }: { farm: SimFarm; adminKey: string; thumb?: string; onError: (m: string) => void }) {
   const r = farm.result
   const stress = farm.input.simulated_stress
   return (
@@ -54,22 +46,13 @@ function FarmCard({ farm, stages, adminKey, thumb, onError }: { farm: SimFarm; s
       <div className="rounded-lg bg-gray-50 p-2 text-xs text-gray-600">
         <div className="mb-1 flex items-center gap-2">
           <b className="text-gray-800">Simulated input</b>
-          <Chip color={stress ? '#b45309' : '#15803d'}>{stress ? `${farm.input.planted_patches.length} stress patches added` : 'Real imagery, untouched'}</Chip>
+          <Chip color={stress ? '#b45309' : '#15803d'}>{stress ? 'Synthetic stress field' : 'Synthetic, untouched'}</Chip>
         </div>
         {farm.input.source}.
-        {stress && (
-          <ul className="mt-1 list-disc pl-4">
-            {farm.input.planted_patches.map((p, i) => (
-              <li key={i}>
-                {p.name}: ~{p.radius_m} m, severity {p.severity}
-              </li>
-            ))}
-          </ul>
-        )}
       </div>
 
-      <StageList stages={stages} farm={farm} />
-      {farm.status === 'FAILED' && <Banner tone="error">Analysis failed: {farm.error?.split('\n')[0]}</Banner>}
+      <ProgressBar farm={farm} />
+      {farm.status === 'failed' && <Banner tone="error">Analysis failed: {farm.error?.message ?? 'Unknown error'}</Banner>}
 
       {r && (
         <div className="space-y-3 border-t border-gray-100 pt-3">
@@ -87,14 +70,7 @@ function FarmCard({ farm, stages, adminKey, thumb, onError }: { farm: SimFarm; s
             <Stat label="Suspicious" value={`${r.suspicious_percent ?? 0}%`} />
             <Stat label="Crop area" value={`${Math.round(r.valid_crop_area_sqm ?? 0)} m²`} />
           </div>
-          {thumb && <img src={thumb} alt={`Hotspot overlay for ${farm.farm_name}`} className="w-full rounded-lg border border-gray-200" />}
-          {stress && r.patches_total != null && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
-              <b>Self-check against the added patches:</b> {r.patches_found} of {r.patches_total} patches found · every flagged pixel inside a planted
-              patch {r.pixel_precision != null ? `(precision ${r.pixel_precision})` : ''} · share of planted area covered {r.pixel_recall ?? '–'}. Mild
-              or small patches can be missed; this tests the pipeline, not real pest detection.
-            </div>
-          )}
+          {thumb && <img src={thumb} alt={`Field photo for ${farm.farm_name}`} className="w-full rounded-lg border border-gray-200" />}
           <div className="flex flex-wrap gap-2">
             {r.report_id && (
               <>
@@ -155,13 +131,13 @@ export default function Simulate() {
     return () => clearInterval(id)
   }, [st?.started, st?.finished, load])
 
-  // overlay thumbnails once each farm completes
+  // field photo thumbnails once each farm completes
   useEffect(() => {
     st?.farms.forEach((f) => {
-      if (f.status === 'COMPLETED' && f.survey_id && !fetched.current.has(f.survey_id)) {
+      if (f.status === 'done' && f.survey_id && !fetched.current.has(f.survey_id)) {
         fetched.current.add(f.survey_id)
         api
-          .adminLayer(key, f.survey_id, 'overlay')
+          .adminLayer(key, f.survey_id, 'rgb')
           .then((b) => setThumbs((t) => ({ ...t, [f.survey_id!]: URL.createObjectURL(b) })))
           .catch(() => undefined)
       }
@@ -202,28 +178,23 @@ export default function Simulate() {
         <Card className="space-y-2 text-sm text-gray-700">
           <h1 className="text-lg font-semibold text-gray-900">Simulate a survey day for three farms</h1>
           <p>
-            Each farm receives a new drone survey. The imagery is <b>real</b> (a rice research station from a public UAV dataset, CC BY 4.0). Farm 1 is
-            left untouched. Farms 2 and 3 have <b>simulated stress patches blended into the real imagery</b>, at known locations, so we can check what the
-            pipeline finds and misses. The patches are <b>not real pest or disease damage</b>, and the reports say so.
+            Each farm receives a new survey from a <b>synthetic</b> field, generated by the engine's own simulator (the same generator behind the
+            Studio demo scenarios). Farm 1 is healthy. Farms 2 and 3 have simulated stress. None of this is real pest or disease damage, and the
+            reports say so.
           </p>
           <p className="text-gray-500">
-            Then the real pipeline runs: quality checks, vegetation-index analysis, the experimental visual check, hotspot extraction, a PDF report, and an
-            SMS to the farmer. The new survey appears first on each farmer's dashboard.
+            Then the real pipeline runs: quality checks, canopy mask, texture, anomalies, clustering, scoring, routing, a PDF report, and an SMS to
+            the farmer. The new survey appears first on each farmer's dashboard.
           </p>
         </Card>
 
-        {st && !st.ready && (
-          <Banner tone="warn">
-            Simulation imagery is not prepared ({st.missing.join(', ')}). Run once: <code className="rounded bg-white/60 px-1">{st.prepare_command}</code>
-          </Banner>
-        )}
         {err && <Banner tone="error">{err}</Banner>}
 
         <Card className="flex flex-wrap items-end gap-3">
           <div className="w-48">
             <TextInput label="Admin key (demo)" value={key} onChange={(e) => setKey(e.target.value)} />
           </div>
-          <Button onClick={start} disabled={busy || running || !st?.ready || !!st?.started}>
+          <Button onClick={start} disabled={busy || running || !!st?.started}>
             {running ? 'Survey running…' : 'Start survey day'}
           </Button>
           <Button variant="secondary" onClick={reset} disabled={busy || running || !st?.started}>
@@ -234,7 +205,7 @@ export default function Simulate() {
 
         <div className="grid gap-4 lg:grid-cols-3">
           {st?.farms.map((f) => (
-            <FarmCard key={f.farm_id} farm={f} stages={st.stages} adminKey={key} thumb={f.survey_id ? thumbs[f.survey_id] : undefined} onError={setErr} />
+            <FarmCard key={f.farm_id} farm={f} adminKey={key} thumb={f.survey_id ? thumbs[f.survey_id] : undefined} onError={setErr} />
           ))}
         </div>
       </main>

@@ -30,13 +30,12 @@ const dict = {
     en: 'Hotspots show where the crop looks unusual. They do not confirm pests or disease; ground inspection is needed.',
     kn: 'ಇವು ಬೆಳೆ ಅಸಾಮಾನ್ಯವಾಗಿ ಕಾಣುವ ಸ್ಥಳಗಳನ್ನು ಮಾತ್ರ ತೋರಿಸುತ್ತವೆ. ಕೀಟ ಅಥವಾ ರೋಗವನ್ನು ಖಚಿತಪಡಿಸಲು ಹೊಲದಲ್ಲಿ ಪರಿಶೀಲನೆ ಅಗತ್ಯ.',
   },
-  P_CRITICAL: { en: 'Critical', kn: 'ತುರ್ತು' },
-  P_HIGH: { en: 'High', kn: 'ಹೆಚ್ಚು' },
-  P_MODERATE: { en: 'Moderate', kn: 'ಮಧ್ಯಮ' },
-  P_LOW: { en: 'Low', kn: 'ಕಡಿಮೆ' },
-  C_HIGH: { en: 'High', kn: 'ಹೆಚ್ಚು' },
-  C_MEDIUM: { en: 'Medium', kn: 'ಮಧ್ಯಮ' },
-  C_LOW: { en: 'Low', kn: 'ಕಡಿಮೆ' },
+  T_red: { en: 'Red', kn: 'ಕೆಂಪು' },
+  T_amber: { en: 'Amber', kn: 'ಅಂಬರ್' },
+  T_grey_blue: { en: 'Grey', kn: 'ಬೂದು' },
+  C_high: { en: 'High', kn: 'ಹೆಚ್ಚು' },
+  C_medium: { en: 'Medium', kn: 'ಮಧ್ಯಮ' },
+  C_low: { en: 'Low', kn: 'ಕಡಿಮೆ' },
 } as const
 
 export type Key = keyof typeof dict
@@ -45,9 +44,8 @@ export function tr(lang: Lang, key: Key): string {
   return dict[key][lang]
 }
 
-export const PRIORITY_COLOR: Record<string, string> = {
-  CRITICAL: '#b91c1c',
-  HIGH: '#ea580c',
-  MODERATE: '#ca8a04',
-  LOW: '#6b7280',
+export const TIER_COLOR: Record<string, string> = {
+  red: '#b91c1c',
+  amber: '#ca8a04',
+  grey_blue: '#6b7280',
 }

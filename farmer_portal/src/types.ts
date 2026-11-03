@@ -1,29 +1,34 @@
 import type { Geometry } from 'geojson'
 
-export type Priority = 'CRITICAL' | 'HIGH' | 'MODERATE' | 'LOW'
-export type Confidence = 'HIGH' | 'MEDIUM' | 'LOW'
+export type Tier = 'red' | 'amber' | 'grey_blue'
+export type Confidence = 'high' | 'medium' | 'low'
 export type Verdict = 'PEST' | 'NOT_PEST' | 'OTHER' | null
 
 export interface Hotspot {
   id: string
-  anomaly_score: number
-  peak_score: number
-  estimated_area_sqm: number
-  crop_area_percent: number
-  priority: Priority
+  tier: Tier
+  biotic_score: number
+  hotspot_class: 'likely_biotic' | 'uncertain' | 'likely_abiotic'
   confidence: Confidence
-  agreement: number
-  dominant_signal: 'BOTH' | 'RGB' | 'MULTISPECTRAL' | 'RGB_INDEX'
-  rgb_signal: number
-  spectral_signal: number
-  pattern: string
-  pattern_hint: string
+  area_m2: number
+  cues: Record<string, number>
+  contributions: Record<string, number>
+  abiotic_hint: 'striping' | 'large_smooth_zone' | null
+  status: string
+  label: string | null
+  note: string | null
+  rank: number
   centroid: [number, number]
   geometry: Geometry
-  verdict: Verdict
-  verdict_note: string
-  verdict_by: string
-  verdict_at: string | null
+}
+
+// The backend stores a six-way label (pest/disease/nutrient/water/weeds_other/false_alarm); the
+// farmer's three ground-check buttons are a coarser view over it.
+export function verdictOf(h: Hotspot): Verdict {
+  if (h.label === null) return null
+  if (h.label === 'pest' || h.label === 'disease') return 'PEST'
+  if (h.label === 'false_alarm') return 'NOT_PEST'
+  return 'OTHER'
 }
 
 export interface SurveySummary {
@@ -42,22 +47,9 @@ export interface SurveyDetail {
   data_source: string
   summary: SurveySummary
   image: { width_px: number; height_px: number; gsd_m: number; bounds_wgs84: [number, number, number, number] }
-  branches: {
-    spectral: { max_unit: number; area_flagged_pct: number }
-    rgb_patchcore: { max_unit: number; area_flagged_pct: number } | null
-  }
-  quality: { quality_ok: boolean }
-  model_version: string
-  warning: string
-  layers?: string[]
-  dataset?: { crop?: string; source?: string; doi?: string; license?: string; attribution?: string; site?: string; simulated_stress?: string } | null
-  synthetic_check?: {
-    note: string
-    pixel_iou: number
-    pixel_recall: number
-    pixel_precision: number
-    patches: { area_sqm: number; coverage: number; detected: boolean }[]
-  }
+  kpis: Record<string, unknown> | null
+  quality: Record<string, unknown> | null
+  layers: string[]
   hotspots: Hotspot[]
   report_id: string | null
 }
@@ -91,24 +83,16 @@ export interface SimFarm {
   village: string | null
   language: 'kn' | 'en' | null
   access_mode: 'DIGITAL' | 'ASSISTED' | 'BOTH' | null
-  input: {
-    source: string
-    simulated_stress: boolean
-    planted_patches: { name: string | null; radius_m: number | null; severity: number | null }[]
-  }
+  input: { source: string; simulated_stress: boolean }
   survey_id: string | null
-  status: 'NOT_STARTED' | 'PROCESSING' | 'COMPLETED' | 'FAILED'
+  status: 'not_started' | 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
   stage: string
-  error: string | null
+  progress: number
+  error: { code: string; message: string; hint: string | null } | null
   result: {
     hotspots: number | null
     suspicious_percent: number | null
     valid_crop_area_sqm: number | null
-    status: string | null
-    patches_found: number | null
-    patches_total: number | null
-    pixel_recall: number | null
-    pixel_precision: number | null
     report_id: string | null
     notified: boolean
     sms: string | null
@@ -116,11 +100,9 @@ export interface SimFarm {
 }
 
 export interface SimStatus {
-  stages: { key: string; label: string }[]
   farms: SimFarm[]
   started: boolean
   finished: boolean
   ready: boolean
   missing: string[]
-  prepare_command: string
 }

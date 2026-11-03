@@ -1,5 +1,5 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react'
-import { PRIORITY_COLOR } from '../i18n'
+import { TIER_COLOR } from '../i18n'
 
 export function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
   return <div className={`rounded-xl border border-gray-200 bg-white p-4 shadow-sm ${className}`}>{children}</div>
@@ -23,7 +23,7 @@ export function Chip({ children, color = '#6b7280' }: { children: ReactNode; col
   )
 }
 
-export const priorityColor = (p: string) => PRIORITY_COLOR[p] ?? '#6b7280'
+export const tierColor = (t: string) => TIER_COLOR[t] ?? '#6b7280'
 
 export function Button({
   variant = 'primary',

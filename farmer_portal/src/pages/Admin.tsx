@@ -5,8 +5,9 @@ import { Banner, Button, Card, Chip, Header, TextInput } from '../components/Ui'
 
 type Overview = Awaited<ReturnType<typeof api.adminOverview>>
 
-const DIRS = ['synthetic/stressed', 'synthetic/healthy', 'maize_rust']
+const SAMPLES = ['stressed-paddy.png', 'healthy-paddy.png', 'demo-field-synthetic.jpg']
 const FARMS = ['FARM-001', 'FARM-002', 'FARM-003']
+const RUNNING = new Set(['queued', 'running'])
 
 export default function Admin() {
   const [key, setKey] = useState('demo-admin')
@@ -14,7 +15,7 @@ export default function Admin() {
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [farm, setFarm] = useState(FARMS[0])
-  const [dir, setDir] = useState(DIRS[0])
+  const [sample, setSample] = useState(SAMPLES[0])
   const [running, setRunning] = useState<string | null>(null)
 
   const load = useCallback(() => {
@@ -24,7 +25,7 @@ export default function Admin() {
         setData(d)
         setErr(null)
         // resume tracking an analysis that was started before this page (re)loaded
-        const p = d.surveys.find((s) => s.status === 'PROCESSING')
+        const p = d.surveys.find((s) => RUNNING.has(s.status))
         if (p) setRunning((r) => r ?? p.survey_id)
       })
       .catch((e) => setErr(e.message))
@@ -38,9 +39,9 @@ export default function Admin() {
     const id = setInterval(async () => {
       try {
         const s = await api.adminSurveyStatus(key, running)
-        if (s.status !== 'PROCESSING') {
+        if (!RUNNING.has(s.status)) {
           setRunning(null)
-          setMsg(s.status === 'COMPLETED' ? `Analysis ${running} completed.` : `Analysis ${running} failed: ${s.error}`)
+          setMsg(s.status === 'done' ? `Analysis ${running} completed.` : `Analysis ${running} failed: ${s.error?.message ?? 'unknown error'}`)
           load()
         }
       } catch (e) {
@@ -63,7 +64,7 @@ export default function Admin() {
   const analyze = async () => {
     setErr(null)
     try {
-      const r = await api.adminAnalyze(key, farm, dir)
+      const r = await api.adminAnalyze(key, farm, sample)
       setRunning(r.survey_id)
       setMsg(`Running pipeline for ${r.survey_id}…`)
       load()
@@ -87,7 +88,7 @@ export default function Admin() {
 
         <Card className="space-y-3">
           <h2 className="font-semibold">Run a new analysis</h2>
-          <p className="text-sm text-gray-600">Runs the full pipeline (alignment, crop mask, spectral baseline, PatchCore, fusion, hotspots) and generates the report.</p>
+          <p className="text-sm text-gray-600">Runs the real pipeline (quality check, canopy mask, VARI/GLI, texture, anomalies, clustering, scoring, routing) and generates the report.</p>
           <div className="flex flex-wrap items-end gap-3 text-sm">
             <label>
               <span className="mb-1 block font-medium text-gray-700">Farm</span>
@@ -96,9 +97,9 @@ export default function Admin() {
               </select>
             </label>
             <label>
-              <span className="mb-1 block font-medium text-gray-700">Survey imagery</span>
-              <select value={dir} onChange={(e) => setDir(e.target.value)} className="rounded-lg border border-gray-300 px-3 py-2">
-                {DIRS.map((d) => <option key={d}>{d}</option>)}
+              <span className="mb-1 block font-medium text-gray-700">Sample image</span>
+              <select value={sample} onChange={(e) => setSample(e.target.value)} className="rounded-lg border border-gray-300 px-3 py-2">
+                {SAMPLES.map((s) => <option key={s}>{s}</option>)}
               </select>
             </label>
             <Button onClick={analyze} disabled={!!running}>{running ? 'Running…' : 'Run analysis'}</Button>
@@ -117,12 +118,12 @@ export default function Admin() {
                   <td className="py-2 font-medium">{s.survey_id}</td>
                   <td>{s.farmer} <span className="text-gray-400">({s.farmer_id})</span></td>
                   <td>{s.village}</td>
-                  <td><Chip color={s.status === 'COMPLETED' ? '#15803d' : s.status === 'FAILED' ? '#b91c1c' : '#b45309'}>{s.status}</Chip></td>
+                  <td><Chip color={s.status === 'done' ? '#15803d' : s.status === 'failed' ? '#b91c1c' : '#b45309'}>{s.status}</Chip></td>
                   <td>{s.hotspots ?? '–'}</td>
                   <td>{s.suspicious_percent != null ? `${s.suspicious_percent}%` : '–'}</td>
                   <td className="text-xs text-gray-500">{s.data_source}</td>
                   <td className="text-right">
-                    <Button variant="secondary" disabled={s.status !== 'COMPLETED'} onClick={() => notify(s.survey_id)} className="!px-2 !py-1 text-xs">
+                    <Button variant="secondary" disabled={s.status !== 'done'} onClick={() => notify(s.survey_id)} className="!px-2 !py-1 text-xs">
                       Send SMS
                     </Button>
                   </td>

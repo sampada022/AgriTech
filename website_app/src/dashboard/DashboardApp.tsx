@@ -20,7 +20,7 @@ const NAV = [
 
 function Shell({ route }: { route: string }) {
   const { user, logout } = useAuth()
-  const { online, refresh, stats } = useStore(); const [spin, setSpin] = useState(false)
+  const { online, refresh, totals } = useStore(); const [spin, setSpin] = useState(false)
   const [page = '', id = ''] = route.replace(/^#\/dashboard\/?/, '').split('/')
   const active = page === '' ? '' : page
   useEffect(() => { document.title = 'AeroScout dashboard' }, [])
@@ -42,7 +42,7 @@ function Shell({ route }: { route: string }) {
             {NAV.map((n) => { const on = n.key === active; return (
               <a key={n.key} href={link(n)} aria-current={on ? 'page' : undefined} className={`flex items-center gap-3 rounded-ctl border-l-2 px-3 py-2.5 text-[15px] ${on ? 'border-hot bg-bg font-medium' : 'border-transparent text-muted hover:text-ink'}`}>
                 <n.Icon aria-hidden size={18} strokeWidth={1.5} />{n.label}
-                {n.key === 'tasks' && stats && stats.totals.open > 0 && <span className="label mono ml-auto rounded-full bg-hot px-2 py-0.5 text-on-hot" style={{ fontSize: 10 }}>{stats.totals.open}</span>}</a>) })}
+                {n.key === 'tasks' && totals.open > 0 && <span className="label mono ml-auto rounded-full bg-hot px-2 py-0.5 text-on-hot" style={{ fontSize: 10 }}>{totals.open}</span>}</a>) })}
           </nav>
           <div className="mt-auto flex flex-col gap-4">
             {user && <div className="border-t border-line pt-4"><p className="truncate text-sm font-medium">{user.name}</p><p className="mono truncate text-xs text-muted">{user.email}</p>
@@ -63,7 +63,7 @@ function Shell({ route }: { route: string }) {
             <ThemeToggle />
           </div>
         </header>
-        {online === false && <p role="alert" className="mx-4 mt-4 rounded-ctl border border-hot p-3 text-sm sm:mx-8">The analysis server is not reachable. Start it with <span className="mono">uv run uvicorn backend.app.main:app --port 8000</span></p>}
+        {online === false && <p role="alert" className="mx-4 mt-4 rounded-ctl border border-hot p-3 text-sm sm:mx-8">The analysis server is not reachable. Start it with <span className="mono">cd apps/api && uvicorn app.main:app --port 8000</span></p>}
         <main className="px-4 py-8 sm:px-8 lg:py-10" id="main">{body}</main>
       </div>
 

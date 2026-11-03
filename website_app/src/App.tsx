@@ -22,6 +22,7 @@ import HowItWorks from './sections/HowItWorks'
 import LearningLoop from './sections/LearningLoop'
 import Technology from './sections/Technology'
 import Dashboard from './sections/Dashboard'
+import FarmerDemo from './sections/FarmerDemo'
 import Impact from './sections/Impact'
 import Team from './sections/Team'
 import FinalCTA from './sections/FinalCTA'
@@ -68,7 +69,7 @@ function AppInner() {
       <ScrollProgress /><Cursor /><Navbar />
       {dataPage ? <DataPage /> : <main id="main">
         <Hero /><Problem /><WhyDronesGetItWrong /><Compare /><HowItWorks /><LearningLoop />
-        <Technology /><Dashboard /><LiveScan /><Impact /><Team /><FinalCTA />
+        <Technology /><FarmerDemo /><Dashboard /><LiveScan /><Impact /><Team /><FinalCTA />
       </main>}
       <Footer />
     </>
