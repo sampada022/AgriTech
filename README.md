@@ -40,56 +40,86 @@ Instead of deep-learning black boxes prone to hallucination, AeroScout uses **cl
 
 ## 🛠️ Architecture & Tech Stack
 
-- **Backend**: Python 3.11, FastAPI, SQLModel + SQLite, NumPy, OpenCV, scikit-image, SciPy, scikit-learn, Shapely, Pillow.
-- **Frontend**: React 19, Vite, Tailwind CSS v4, Framer Motion, GSAP, Lucide Icons, Leaflet.
-- **Zero-Internet Fallback**: Fully self-contained offline mode with SHA-256 leaf diagnosis hash cache and dark-canvas basemaps.
+- **Backend**: Python 3.11, FastAPI, SQLModel + SQLite, NumPy, OpenCV, scikit-image, SciPy, scikit-learn, Shapely, Pillow, Playwright (PDF rendering).
+- **Frontend**: React 19, Vite, Tailwind CSS v4, Framer Motion, GSAP, Lucide Icons, Leaflet. Two separate apps share the one backend: `website_app` (agronomist/Studio dashboard) and `farmer_portal` (farmer-facing dashboard).
+- **Leaf diagnosis**: Gemini (`google-genai`) by default, with an Anthropic provider also available. Falls back to a cached/canned reply when no API key is set or the live call fails, so the demo never shows a blank screen.
 
 ---
 
 ## ⚡ Quick Start
 
 ### 1. Prerequisites
-- Python 3.11+
+- Python **3.11** specifically — `numpy==1.26.4` has no prebuilt wheel for 3.13, so a newer interpreter will fail to install. On Windows, use the `py -3.11` launcher if you have multiple Python versions.
 - Node.js 20+
 
-### 2. Backend Setup
+### 2. Clone and set up the Python environment
 ```bash
-# Clone the repository
 git clone https://github.com/sampada022/AgriTech.git
 cd AgriTech
 
-# Install Python dependencies
-pip install -r requirements.txt
+py -3.11 -m venv .venv
+.venv\Scripts\activate          # macOS/Linux: source .venv/bin/activate
 
-# Seed realistic demo fields and farmer accounts
-python -m app.seed
+pip install -r apps/api/requirements.txt
+playwright install chromium     # one-time, needed for PDF report rendering
 ```
 
-### 3. Run the Unified Server
+### 3. Add your Gemini API key
+Create `apps/api/.env` (this file is gitignored — each developer needs their own):
+```
+GEMINI_API_KEY=your_key_here
+```
+Get a free-tier key from [Google AI Studio](https://aistudio.google.com/apikey). Without a key set, leaf diagnosis still works but only returns cached/canned replies instead of live analysis.
+
+### 4. Seed demo fields and farmer accounts
+```bash
+cd apps/api
+python -m app.seed
+cd ../..
+```
+
+### 5. Run the backend
 ```bash
 cd apps/api
 uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
-Open your browser to: **`http://localhost:8000`**
+If `website_app` has already been built (`npm run build`, see below), the Studio dashboard is served directly at **`http://localhost:8000`**. Otherwise this just serves the API.
+
+### 6. Run the frontends (separate terminals)
+```bash
+cd website_app
+npm install
+npm run dev
+```
+Studio dashboard at **`http://localhost:5174`** — proxies `/api` and `/files` to the backend on port 8000.
+
+```bash
+cd farmer_portal
+npm install
+npm run dev
+```
+Farmer dashboard at **`http://localhost:5173`** — same proxy setup.
 
 ---
 
 ## 🔑 Demo Access Credentials
 
-The demo application includes pre-configured access for judging and testing:
+The Studio dashboard includes pre-configured access for judging and testing:
 - **Demo Account**: `demo@aeroscout.app`
 - **Password**: `aeroscout-demo`
 - *(Or simply click the one-tap **"Fill demo account"** button on the Login page)*
+
+The seeded farmer accounts (from `python -m app.seed`) log into `farmer_portal` via OTP, PIN `1234`.
 
 ---
 
 ## 🧪 Running Automated Tests
 
-Run the comprehensive 21-test suite covering geo-conversions, CV anomaly tiling, 2-opt TSP route planning, leaf diagnosis cache, and logistic model recalibration:
+Run the backend test suite — geo-conversions, CV anomaly tiling, 2-opt TSP route planning, leaf diagnosis providers and cache, logistic model recalibration, and the farmer/OTP/assisted API surface:
 ```bash
 pytest apps/api/tests -v
 ```
-All 21 unit and contract tests run locally with zero external network dependencies.
+176 tests, all running locally with no external network dependencies (the live Gemini/Anthropic providers are exercised against local stub servers, not the real API).
 
 ---
 
